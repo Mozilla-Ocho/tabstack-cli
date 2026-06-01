@@ -110,6 +110,17 @@ make help         # list all targets
 See [CLAUDE.md](CLAUDE.md) for an architecture overview. The API surface is
 described in [openapi.yaml](openapi.yaml).
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). This project
+follows the [Mozilla Community Participation Guidelines](CODE_OF_CONDUCT.md). To
+report a security issue, see [SECURITY.md](SECURITY.md).
+
+## Releases
+
+Tagged releases (`vMAJOR.MINOR.PATCH`) build cross-platform binaries via
+[goreleaser](https://goreleaser.com). Build a local snapshot with `make snapshot`.
+
 ## License
 
 [MIT](LICENSE)

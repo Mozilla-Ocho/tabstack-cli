@@ -5,7 +5,7 @@ LDFLAGS := -ldflags "-s -w -X $(PKG)/cmd.version=$(VERSION)"
 
 GOBIN   := $(shell go env GOPATH)/bin
 
-.PHONY: all build install run fmt vet tidy test lint clean smoke
+.PHONY: all build install run fmt vet tidy test lint clean smoke snapshot
 
 all: build
 
@@ -35,8 +35,11 @@ smoke: build ## Run live API smoke test (needs an API key; SKIP_AGENT=1 to skip 
 
 lint: fmt vet ## Format then vet
 
+snapshot: ## Build a local release snapshot with goreleaser (no publish)
+	goreleaser release --snapshot --clean
+
 clean: ## Remove build artifacts
-	rm -rf bin
+	rm -rf bin dist
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
