@@ -1,0 +1,96 @@
+package cmd
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
+)
+
+// exitErr wraps an error with a specific process exit code. main.go inspects
+// for this so different failure classes map to different codes, which makes the
+// CLI scriptable: 1 runtime/network, 2 usage (cobra default), 3 API error.
+type exitErr struct {
+	code int
+	err  error
+}
+
+func (e *exitErr) Error() string { return e.err.Error() }
+func (e *exitErr) Unwrap() error { return e.err }
+func (e *exitErr) Code() int     { return e.code }
+
+// withCode tags an error with an exit code.
+func withCode(code int, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &exitErr{code: code, err: err}
+}
+
+// classifyError turns a raw error into a coded one. API errors get code 3,
+// everything else gets 1. Usage errors are handled by cobra before we get here.
+func classifyError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		return withCode(3, err)
+	}
+	return withCode(1, err)
+}
+
+// readInput resolves a value that may be a literal string, an @file reference,
+// or "-" for stdin. This is the same ergonomics curl uses for -d, and it keeps
+// large JSON schemas out of the shell. An empty spec returns an empty string.
+func readInput(spec string) (string, error) {
+	switch {
+	case spec == "":
+		return "", nil
+	case spec == "-":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read stdin: %w", err)
+		}
+		return string(data), nil
+	case strings.HasPrefix(spec, "@"):
+		path := strings.TrimPrefix(spec, "@")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", path, err)
+		}
+		return string(data), nil
+	default:
+		return spec, nil
+	}
+}
+
+// readJSON resolves an input spec and validates that it is well-formed JSON,
+// returning it as json.RawMessage. We validate up front so a malformed schema
+// fails locally with a clear message instead of as an opaque API 400.
+func readJSON(spec string) (json.RawMessage, error) {
+	raw, err := readInput(spec)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, errors.New("expected JSON input but got nothing")
+	}
+	if !json.Valid([]byte(raw)) {
+		return nil, fmt.Errorf("input is not valid JSON")
+	}
+	return json.RawMessage(raw), nil
+}
+
+// geoTarget builds a *GeoTarget from a country flag, returning nil when unset
+// so the field is omitted from the request body entirely.
+func geoTarget(country string) *client.GeoTarget {
+	if strings.TrimSpace(country) == "" {
+		return nil
+	}
+	return &client.GeoTarget{Country: strings.ToUpper(country)}
+}

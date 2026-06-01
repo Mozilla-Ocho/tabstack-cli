@@ -1,0 +1,18 @@
+# Build artifacts
+/bin/
+/dist/
+
+# Test & coverage output
+*.out
+*.test
+coverage.*
+
+# Local config / secrets
+*.env
+.env
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
