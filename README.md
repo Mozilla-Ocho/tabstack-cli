@@ -5,16 +5,28 @@ automation, web research, and structured extraction and generation from any URL.
 
 ## Install
 
-```bash
-go install github.com/Mozilla-Ocho/tabstack-cli/cmd/tabstack@latest
-```
-
-Or build from source:
+**macOS / Linux — quickest:**
 
 ```bash
 git clone https://github.com/Mozilla-Ocho/tabstack-cli.git
 cd tabstack-cli
-make build        # produces ./bin/tabstack
+make install-local   # builds and copies to /usr/local/bin — works in any terminal immediately
+```
+
+**Pre-built binaries** (no Go required) are available on the
+[Releases page](https://github.com/Mozilla-Ocho/tabstack-cli/releases) once a tagged release is cut.
+
+**Go developers** (`go install` puts the binary in `$GOPATH/bin`, usually `~/go/bin`):
+
+```bash
+go install github.com/Mozilla-Ocho/tabstack-cli/cmd/tabstack@latest
+```
+
+If `tabstack` is not found after that, add `~/go/bin` to your PATH:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc and restart your terminal
+export PATH="$HOME/go/bin:$PATH"
 ```
 
 ## Authentication
@@ -65,8 +77,10 @@ tabstack agent automate "Find the pricing for the Pro plan" --url https://exampl
 # Web research (streams progress; prints a report with cited sources)
 tabstack agent research "What is the capital of France?" --mode fast
 
-# Respond to a paused automation that asked for input
-tabstack agent input <request-id> --data '{"answer":"yes"}'
+# Respond to a paused automation that asked for input (provide field values)
+tabstack agent input <request-id> --data '{"fields":[{"ref":"field1","value":"yes"}]}'
+# Or decline the request
+tabstack agent input <request-id> --data '{"cancelled":true}'
 ```
 
 `--schema`, `--instructions`, and `--data` all accept a literal string, `@file`

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"net/url"
 )
 
 // AutomateRequest is the body for POST /automate. The endpoint always streams
@@ -25,17 +26,26 @@ func (c *Client) Automate(ctx context.Context, req AutomateRequest, fn func(Even
 	return c.doStream(ctx, "/automate", req, fn)
 }
 
-// AutomateInputRequest is the body for POST /automate/{requestID}/input. It
-// supplies a response when an in-flight automation asks for input. The payload
-// is freeform, mirroring whatever the task requested.
+// AutomateInputFieldValue is a single field submission for an interactive form
+// request. Ref matches the field identifier from the SSE event; Value is the
+// user-supplied answer.
+type AutomateInputFieldValue struct {
+	Ref   string `json:"ref"`
+	Value any    `json:"value"`
+}
+
+// AutomateInputRequest is the body for POST /automate/{requestID}/input.
+// Supply Fields with values when answering a form request, or set Cancelled to
+// true to decline without providing data.
 type AutomateInputRequest struct {
-	Data any `json:"data,omitempty"`
+	Fields    []AutomateInputFieldValue `json:"fields,omitempty"`
+	Cancelled bool                      `json:"cancelled,omitempty"`
 }
 
 // AutomateInput submits an input response for a running automation task. This
 // endpoint is a plain request/response, not a stream.
 func (c *Client) AutomateInput(ctx context.Context, requestID string, req AutomateInputRequest) error {
-	return c.doJSON(ctx, "/automate/"+requestID+"/input", req, nil)
+	return c.doJSON(ctx, "/automate/"+url.PathEscape(requestID)+"/input", req, nil)
 }
 
 // Citation is a single source backing a research report. The report text refers

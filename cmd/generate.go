@@ -44,6 +44,12 @@ func newGenerateJSONCmd() *cobra.Command {
 			"for stdin. Only one of them can read stdin in a single invocation.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if instructions == "-" && schema == "-" {
+				return withCode(2, fmt.Errorf(
+					"--schema and --instructions cannot both read from stdin (-); "+
+						"pass one as a literal string or @file",
+				))
+			}
 			instr, err := readInput(instructions)
 			if err != nil {
 				return withCode(2, err)
@@ -57,6 +63,10 @@ func newGenerateJSONCmd() *cobra.Command {
 
 			schemaJSON, err := readJSON(schema)
 			if err != nil {
+				return withCode(2, err)
+			}
+
+			if err := validEffort(effort); err != nil {
 				return withCode(2, err)
 			}
 
@@ -83,8 +93,6 @@ func newGenerateJSONCmd() *cobra.Command {
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
-	_ = cmd.MarkFlagRequired("instructions")
-	_ = cmd.MarkFlagRequired("schema")
 
 	return cmd
 }

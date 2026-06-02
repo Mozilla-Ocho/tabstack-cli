@@ -184,6 +184,12 @@ func newAutomateCmd() *cobra.Command {
 			"workflows.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
+				return withCode(2, fmt.Errorf("--max-iterations must be between 1 and 100 (got %d)", maxIter))
+			}
+			if maxValidation != 0 && (maxValidation < 1 || maxValidation > 10) {
+				return withCode(2, fmt.Errorf("--max-validation-attempts must be between 1 and 10 (got %d)", maxValidation))
+			}
 			req := client.AutomateRequest{
 				Task:                  args[0],
 				Guardrails:            guardrails,
@@ -244,6 +250,9 @@ func newResearchCmd() *cobra.Command {
 			"for quick answers or balanced (default) for deeper multi-source work.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validResearchMode(mode); err != nil {
+				return withCode(2, err)
+			}
 			req := client.ResearchRequest{
 				Query:        args[0],
 				Mode:         client.ResearchMode(mode),
@@ -282,16 +291,31 @@ func newInputCmd() *cobra.Command {
 		Use:   "input <request-id>",
 		Short: "Submit an input response to a running automation task",
 		Long: "When an automation task pauses to ask for input, submit the response\n" +
-			"with this command using the request ID from the automation stream.\n" +
-			"The --data payload is freeform JSON (literal, @file, or -).",
+			"with this command using the request ID from the automation stream.\n\n" +
+			"The --data payload must be a JSON object:\n" +
+			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  — to provide values\n" +
+			"  {\"cancelled\":true}                                — to decline",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dataSpec == "" {
+				return withCode(2, fmt.Errorf("--data is required (JSON object with fields or cancelled)"))
+			}
 			raw, err := readJSON(dataSpec)
 			if err != nil {
 				return withCode(2, err)
 			}
 
-			req := client.AutomateInputRequest{Data: raw}
+			var req client.AutomateInputRequest
+			if err := json.Unmarshal(raw, &req); err != nil {
+				return withCode(2, fmt.Errorf("--data: %w", err))
+			}
+			if len(req.Fields) == 0 && !req.Cancelled {
+				return withCode(2, fmt.Errorf(
+					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
+						"got neither — unknown keys are ignored by the API",
+				))
+			}
+
 			if err := rootApp.client.AutomateInput(context.Background(), args[0], req); err != nil {
 				return classifyError(err)
 			}
@@ -306,9 +330,7 @@ func newInputCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dataSpec, "data", "", "JSON input payload: literal, @file, or - (required)")
-	_ = cmd.MarkFlagRequired("data")
-
+	cmd.Flags().StringVar(&dataSpec, "data", "", "JSON input payload: {\"fields\":[{\"ref\":\"...\",\"value\":\"...\"}]} or {\"cancelled\":true} (required)")
 	return cmd
 }
 

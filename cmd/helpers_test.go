@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
@@ -147,5 +149,50 @@ func TestFailureError(t *testing.T) {
 	noMsg := failureError("automation", "")
 	if noMsg.Error() != "automation reported failure" {
 		t.Errorf("got %q", noMsg.Error())
+	}
+}
+
+func TestValidEffort(t *testing.T) {
+	for _, valid := range []string{"", "min", "standard", "max"} {
+		if err := validEffort(valid); err != nil {
+			t.Errorf("validEffort(%q) = %v, want nil", valid, err)
+		}
+	}
+	for _, bad := range []string{"turbo", "STANDARD", "Max"} {
+		if err := validEffort(bad); err == nil {
+			t.Errorf("validEffort(%q) should error", bad)
+		}
+	}
+}
+
+func TestValidResearchMode(t *testing.T) {
+	for _, valid := range []string{"", "fast", "balanced"} {
+		if err := validResearchMode(valid); err != nil {
+			t.Errorf("validResearchMode(%q) = %v, want nil", valid, err)
+		}
+	}
+	for _, bad := range []string{"deep", "FAST", "turbo"} {
+		if err := validResearchMode(bad); err == nil {
+			t.Errorf("validResearchMode(%q) should error", bad)
+		}
+	}
+}
+
+func TestClassifyErrorTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1)
+	cancel()
+	<-ctx.Done()
+	timeoutErr := ctx.Err()
+
+	out := classifyError(timeoutErr)
+	var c *exitErr
+	if !errors.As(out, &c) || c.Code() != 1 {
+		t.Fatalf("timeout error -> %v, want code 1", out)
+	}
+	if !strings.Contains(out.Error(), "timed out") {
+		t.Errorf("error message should mention 'timed out': %q", out.Error())
+	}
+	if strings.Contains(out.Error(), "context deadline exceeded") {
+		t.Errorf("raw Go error leaked into message: %q", out.Error())
 	}
 }

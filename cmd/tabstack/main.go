@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/cmd"
 )
@@ -28,6 +29,26 @@ func main() {
 		if c, ok := errors.AsType[coded](err); ok {
 			os.Exit(c.Code())
 		}
+		if isCobraUsageError(err) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
+}
+
+// isCobraUsageError detects errors that Cobra emits for wrong argument counts,
+// unknown commands, and unknown flags — all user mistakes that should exit 2.
+//
+// This relies on Cobra's error message prefixes (stable across v1.x, tested
+// against v1.10.2). A more robust fix would replace cobra.ExactArgs with
+// custom Args validators that return withCode(2,...) directly, eliminating
+// the need for string matching here. TODO: migrate when convenient.
+func isCobraUsageError(err error) bool {
+	msg := err.Error()
+	return strings.HasPrefix(msg, "accepts ") ||
+		strings.HasPrefix(msg, "unknown command") ||
+		strings.HasPrefix(msg, "unknown flag") ||
+		strings.HasPrefix(msg, "unknown shorthand flag") ||
+		strings.HasPrefix(msg, "required flag") ||
+		strings.HasPrefix(msg, "invalid argument") // pflag typed-value parse errors
 }
