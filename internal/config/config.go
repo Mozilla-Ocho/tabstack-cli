@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,7 +129,14 @@ func loadFile() (fileConfig, error) {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"`)
+		v = strings.TrimSpace(v)
+		// Values are JSON-encoded strings. Try to decode; fall back to bare-quote strip for legacy files.
+		var decoded string
+		if json.Unmarshal([]byte(v), &decoded) == nil {
+			v = decoded
+		} else {
+			v = strings.Trim(v, `"`)
+		}
 		switch k {
 		case "api_key":
 			fc.APIKey = v
@@ -149,11 +158,20 @@ func Save(apiKey, baseURL string) error {
 		return err
 	}
 
+	apiKeyJSON, err := json.Marshal(apiKey)
+	if err != nil {
+		return fmt.Errorf("encode api key: %w", err)
+	}
+
 	var b strings.Builder
 	b.WriteString("# tabstack CLI configuration\n")
-	b.WriteString("api_key = \"" + apiKey + "\"\n")
+	b.WriteString("api_key = " + string(apiKeyJSON) + "\n")
 	if baseURL != "" && baseURL != DefaultBaseURL {
-		b.WriteString("base_url = \"" + baseURL + "\"\n")
+		baseURLJSON, err := json.Marshal(baseURL)
+		if err != nil {
+			return fmt.Errorf("encode base url: %w", err)
+		}
+		b.WriteString("base_url = " + string(baseURLJSON) + "\n")
 	}
 
 	return os.WriteFile(path, []byte(b.String()), 0o600)

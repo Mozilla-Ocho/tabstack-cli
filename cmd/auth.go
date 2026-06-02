@@ -48,6 +48,10 @@ func newAuthLoginCmd() *cobra.Command {
 				return withCode(2, fmt.Errorf("no key provided"))
 			}
 
+			if err := validateKeyFormat(key); err != nil {
+				return withCode(2, err)
+			}
+
 			if err := config.Save(key, flagBaseURL); err != nil {
 				return withCode(1, fmt.Errorf("save config: %w", err))
 			}
@@ -61,6 +65,21 @@ func newAuthLoginCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&keyFlag, "key", "", "API key (if omitted, you will be prompted)")
 	return cmd
+}
+
+// validateKeyFormat performs a basic sanity check on a supplied API key before
+// saving it. It does not make an API call.
+func validateKeyFormat(key string) error {
+	if strings.ContainsAny(key, "\"\n\r\t") {
+		return fmt.Errorf("key contains invalid characters (newline, tab, or quote)")
+	}
+	if strings.TrimSpace(key) != key {
+		return fmt.Errorf("key must not have leading or trailing whitespace")
+	}
+	if len(key) < 8 {
+		return fmt.Errorf("key is too short to be valid (got %d characters)", len(key))
+	}
+	return nil
 }
 
 func newAuthStatusCmd() *cobra.Command {
