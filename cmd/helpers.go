@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 
@@ -41,7 +43,41 @@ func classifyError(err error) error {
 	if errors.As(err, &apiErr) {
 		return withCode(3, err)
 	}
+	if isTimeoutError(err) {
+		return withCode(1, fmt.Errorf("request timed out — use --timeout to increase the limit (e.g. --timeout 30s)"))
+	}
 	return withCode(1, err)
+}
+
+// validEffort returns an error if effort is set to an unrecognised value.
+// An empty string is allowed (means "use server default").
+func validEffort(effort string) error {
+	switch effort {
+	case "", "min", "standard", "max":
+		return nil
+	default:
+		return fmt.Errorf("invalid effort %q: must be one of: min, standard, max", effort)
+	}
+}
+
+// validResearchMode returns an error if mode is set to an unrecognised value.
+// An empty string is allowed (means "use server default").
+func validResearchMode(mode string) error {
+	switch mode {
+	case "", "fast", "balanced":
+		return nil
+	default:
+		return fmt.Errorf("invalid mode %q: must be one of: fast, balanced", mode)
+	}
+}
+
+// isTimeoutError detects context deadline exceeded and net-level timeouts.
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // readInput resolves a value that may be a literal string, an @file reference,

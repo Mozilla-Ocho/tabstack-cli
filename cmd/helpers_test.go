@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,33 +152,47 @@ func TestFailureError(t *testing.T) {
 	}
 }
 
-func TestOutputFlagValidation(t *testing.T) {
-	// Confirm the exit error infrastructure works for usage errors.
-	err := withCode(2, fmt.Errorf(`invalid output format "bad": must be one of: pretty, json`))
-	var c *exitErr
-	if !errors.As(err, &c) || c.Code() != 2 {
-		t.Errorf("expected code 2, got %v", err)
+func TestValidEffort(t *testing.T) {
+	for _, valid := range []string{"", "min", "standard", "max"} {
+		if err := validEffort(valid); err != nil {
+			t.Errorf("validEffort(%q) = %v, want nil", valid, err)
+		}
+	}
+	for _, bad := range []string{"turbo", "STANDARD", "Max"} {
+		if err := validEffort(bad); err == nil {
+			t.Errorf("validEffort(%q) should error", bad)
+		}
 	}
 }
 
-func TestDualStdinConflictMessage(t *testing.T) {
-	instructions := "-"
-	schema := "-"
-	var err error
-	if instructions == "-" && schema == "-" {
-		err = withCode(2, fmt.Errorf(
-			"--schema and --instructions cannot both read from stdin (-); "+
-				"pass one as a literal string or @file",
-		))
+func TestValidResearchMode(t *testing.T) {
+	for _, valid := range []string{"", "fast", "balanced"} {
+		if err := validResearchMode(valid); err != nil {
+			t.Errorf("validResearchMode(%q) = %v, want nil", valid, err)
+		}
 	}
-	if err == nil {
-		t.Fatal("expected error for dual stdin")
+	for _, bad := range []string{"deep", "FAST", "turbo"} {
+		if err := validResearchMode(bad); err == nil {
+			t.Errorf("validResearchMode(%q) should error", bad)
+		}
 	}
+}
+
+func TestClassifyErrorTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1)
+	cancel()
+	<-ctx.Done()
+	timeoutErr := ctx.Err()
+
+	out := classifyError(timeoutErr)
 	var c *exitErr
-	if !errors.As(err, &c) || c.Code() != 2 {
-		t.Errorf("expected code 2, got %v", err)
+	if !errors.As(out, &c) || c.Code() != 1 {
+		t.Fatalf("timeout error -> %v, want code 1", out)
 	}
-	if !strings.Contains(err.Error(), "cannot both read from stdin") {
-		t.Errorf("expected helpful message, got: %q", err.Error())
+	if !strings.Contains(out.Error(), "timed out") {
+		t.Errorf("error message should mention 'timed out': %q", out.Error())
+	}
+	if strings.Contains(out.Error(), "context deadline exceeded") {
+		t.Errorf("raw Go error leaked into message: %q", out.Error())
 	}
 }
