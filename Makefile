@@ -15,6 +15,12 @@ build: ## Build the binary into ./bin
 install: ## Install into $GOPATH/bin
 	go install $(LDFLAGS) ./cmd/tabstack
 
+.PHONY: install-local
+install-local: build ## install binary to /usr/local/bin (works without Go PATH setup)
+	sudo mkdir -p /usr/local/bin
+	sudo install -m 755 bin/tabstack /usr/local/bin/tabstack
+	@echo "Installed to /usr/local/bin/tabstack"
+
 run: ## Build and run; pass args with ARGS="..."
 	go run ./cmd/tabstack $(ARGS)
 
