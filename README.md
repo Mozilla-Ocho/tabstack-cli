@@ -77,8 +77,10 @@ tabstack agent automate "Find the pricing for the Pro plan" --url https://exampl
 # Web research (streams progress; prints a report with cited sources)
 tabstack agent research "What is the capital of France?" --mode fast
 
-# Respond to a paused automation that asked for input
-tabstack agent input <request-id> --data '{"answer":"yes"}'
+# Respond to a paused automation that asked for input (provide field values)
+tabstack agent input <request-id> --data '{"fields":[{"ref":"field1","value":"yes"}]}'
+# Or decline the request
+tabstack agent input <request-id> --data '{"cancelled":true}'
 ```
 
 `--schema`, `--instructions`, and `--data` all accept a literal string, `@file`

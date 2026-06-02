@@ -309,6 +309,12 @@ func newInputCmd() *cobra.Command {
 			if err := json.Unmarshal(raw, &req); err != nil {
 				return withCode(2, fmt.Errorf("--data: %w", err))
 			}
+			if len(req.Fields) == 0 && !req.Cancelled {
+				return withCode(2, fmt.Errorf(
+					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
+						"got neither — unknown keys are ignored by the API",
+				))
+			}
 
 			if err := rootApp.client.AutomateInput(context.Background(), args[0], req); err != nil {
 				return classifyError(err)

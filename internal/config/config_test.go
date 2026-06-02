@@ -241,3 +241,28 @@ func TestConfigFileWrittenWith0600(t *testing.T) {
 		t.Errorf("file perm = %o, want 0600", perm)
 	}
 }
+
+func TestSaveFixesPermissionsOnExistingFile(t *testing.T) {
+	dir := isolateConfig(t)
+
+	// Pre-create the file with insecure permissions (e.g. user-created or old install).
+	path := filepath.Join(dir, "tabstack", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Save("newkey", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("file perm after Save = %o, want 0600 (Save must chmod existing files)", perm)
+	}
+}

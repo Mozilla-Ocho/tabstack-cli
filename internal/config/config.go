@@ -174,5 +174,10 @@ func Save(apiKey, baseURL string) error {
 		b.WriteString("base_url = " + string(baseURLJSON) + "\n")
 	}
 
-	return os.WriteFile(path, []byte(b.String()), 0o600)
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	// WriteFile only sets 0600 on newly created files; existing files retain
+	// their original permissions. Explicitly chmod to enforce the restriction.
+	return os.Chmod(path, 0o600)
 }

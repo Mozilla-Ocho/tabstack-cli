@@ -49,5 +49,6 @@ func isCobraUsageError(err error) bool {
 		strings.HasPrefix(msg, "unknown command") ||
 		strings.HasPrefix(msg, "unknown flag") ||
 		strings.HasPrefix(msg, "unknown shorthand flag") ||
-		strings.HasPrefix(msg, "required flag")
+		strings.HasPrefix(msg, "required flag") ||
+		strings.HasPrefix(msg, "invalid argument") // pflag typed-value parse errors
 }

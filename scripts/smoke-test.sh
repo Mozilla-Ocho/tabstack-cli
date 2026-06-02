@@ -127,12 +127,12 @@ run "generate json" -- generate json "$URL" \
 # --- validation / negative cases (no API spend) ------------------------------
 
 # Missing required flag -> cobra usage error (exit 1).
-run_expect_fail "extract json missing --schema" 1 -- extract json "$URL"
+run_expect_fail "extract json missing --schema" 2 -- extract json "$URL"
 # Flag present but empty -> app validation (exit 2).
 run_expect_fail "generate json empty --instructions" 2 -- generate json "$URL" --schema '{}' --instructions ''
 # Malformed JSON caught locally before any API call (exit 2).
 run_expect_fail "extract json invalid JSON schema" 2 -- extract json "$URL" --schema 'not json'
-run_expect_fail "agent input missing --data" 1 -- agent input some-request-id
+run_expect_fail "agent input missing --data" 2 -- agent input some-request-id
 
 # --- agent (slow / costly) ---------------------------------------------------
 
