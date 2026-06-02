@@ -36,6 +36,13 @@ func main() {
 	}
 }
 
+// isCobraUsageError detects errors that Cobra emits for wrong argument counts,
+// unknown commands, and unknown flags — all user mistakes that should exit 2.
+//
+// This relies on Cobra's error message prefixes (stable across v1.x, tested
+// against v1.10.2). A more robust fix would replace cobra.ExactArgs with
+// custom Args validators that return withCode(2,...) directly, eliminating
+// the need for string matching here. TODO: migrate when convenient.
 func isCobraUsageError(err error) bool {
 	msg := err.Error()
 	return strings.HasPrefix(msg, "accepts ") ||

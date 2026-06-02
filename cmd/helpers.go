@@ -44,7 +44,7 @@ func classifyError(err error) error {
 		return withCode(3, err)
 	}
 	if isTimeoutError(err) {
-		return withCode(1, fmt.Errorf("request timed out — use --timeout to increase the limit (e.g. --timeout 30s)"))
+		return withCode(1, fmt.Errorf("request timed out — check your network connection, or for non-streaming commands increase --timeout (e.g. --timeout 30s)"))
 	}
 	return withCode(1, err)
 }

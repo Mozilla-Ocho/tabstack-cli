@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
@@ -87,6 +88,37 @@ func TestExtractCitations(t *testing.T) {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
+}
+
+func TestAutomateIterationBounds(t *testing.T) {
+	cases := []struct {
+		maxIter       int
+		maxValidation int
+		wantErr       bool
+	}{
+		{0, 0, false},    // not set — server default
+		{1, 1, false},    // minimum valid
+		{100, 10, false}, // maximum valid
+		{-1, 0, true},
+		{101, 0, true},
+		{0, -1, true},
+		{0, 11, true},
+	}
+	for _, tc := range cases {
+		var err error
+		if tc.maxIter != 0 && (tc.maxIter < 1 || tc.maxIter > 100) {
+			err = fmt.Errorf("bounds")
+		}
+		if err == nil && tc.maxValidation != 0 && (tc.maxValidation < 1 || tc.maxValidation > 10) {
+			err = fmt.Errorf("bounds")
+		}
+		if tc.wantErr && err == nil {
+			t.Errorf("maxIter=%d maxVal=%d: expected error", tc.maxIter, tc.maxValidation)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("maxIter=%d maxVal=%d: unexpected error", tc.maxIter, tc.maxValidation)
+		}
+	}
 }
 
 func TestExtractMessage(t *testing.T) {

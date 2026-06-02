@@ -184,6 +184,12 @@ func newAutomateCmd() *cobra.Command {
 			"workflows.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
+				return withCode(2, fmt.Errorf("--max-iterations must be between 1 and 100 (got %d)", maxIter))
+			}
+			if maxValidation != 0 && (maxValidation < 1 || maxValidation > 10) {
+				return withCode(2, fmt.Errorf("--max-validation-attempts must be between 1 and 10 (got %d)", maxValidation))
+			}
 			req := client.AutomateRequest{
 				Task:                  args[0],
 				Guardrails:            guardrails,
