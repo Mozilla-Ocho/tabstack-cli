@@ -79,28 +79,34 @@ func NewRootCmd() *cobra.Command {
 // resolveMode decides the output mode. An explicit --output wins; otherwise we
 // default to pretty when stdout is a terminal and json when it is piped, so
 // `tabstack ... | jq` just works without a flag.
-func resolveMode() ui.OutputMode {
+func resolveMode() (ui.OutputMode, error) {
 	switch flagOutput {
 	case "json":
-		return ui.ModeJSON
+		return ui.ModeJSON, nil
 	case "pretty":
-		return ui.ModePretty
-	default:
+		return ui.ModePretty, nil
+	case "":
 		if isatty.IsTerminal(os.Stdout.Fd()) {
-			return ui.ModePretty
+			return ui.ModePretty, nil
 		}
-		return ui.ModeJSON
+		return ui.ModeJSON, nil
+	default:
+		return "", fmt.Errorf("invalid output format %q: must be one of: pretty, json", flagOutput)
 	}
 }
 
 // newRenderer constructs the renderer from the resolved flags.
-func newRenderer() ui.Renderer {
+func newRenderer() (ui.Renderer, error) {
+	mode, err := resolveMode()
+	if err != nil {
+		return ui.Renderer{}, err
+	}
 	return ui.Renderer{
 		Out:    os.Stdout,
 		Err:    os.Stderr,
-		Mode:   resolveMode(),
+		Mode:   mode,
 		Styles: ui.NewStyles(flagNoColor),
-	}
+	}, nil
 }
 
 // setupApp resolves config, validates the key, and builds the client. It is the
@@ -114,6 +120,11 @@ func setupApp() error {
 		return fmt.Errorf("no API key found. Set one with `tabstack auth login`, the %s environment variable, or --api-key", "TABSTACK_API_KEY")
 	}
 
+	renderer, err := newRenderer()
+	if err != nil {
+		return withCode(2, err)
+	}
+
 	var opts []client.Option
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
@@ -122,7 +133,7 @@ func setupApp() error {
 	rootApp = &app{
 		cfg:      cfg,
 		client:   client.New(cfg.APIKey, cfg.BaseURL, opts...),
-		renderer: newRenderer(),
+		renderer: renderer,
 	}
 	return nil
 }
@@ -135,9 +146,13 @@ func setupRendererOnly() error {
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
+	renderer, err := newRenderer()
+	if err != nil {
+		return withCode(2, err)
+	}
 	rootApp = &app{
 		cfg:      cfg,
-		renderer: newRenderer(),
+		renderer: renderer,
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/cmd"
 )
@@ -28,6 +29,18 @@ func main() {
 		if c, ok := errors.AsType[coded](err); ok {
 			os.Exit(c.Code())
 		}
+		if isCobraUsageError(err) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
+}
+
+func isCobraUsageError(err error) bool {
+	msg := err.Error()
+	return strings.HasPrefix(msg, "accepts ") ||
+		strings.HasPrefix(msg, "unknown command") ||
+		strings.HasPrefix(msg, "unknown flag") ||
+		strings.HasPrefix(msg, "unknown shorthand flag") ||
+		strings.HasPrefix(msg, "required flag")
 }

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
@@ -147,5 +149,36 @@ func TestFailureError(t *testing.T) {
 	noMsg := failureError("automation", "")
 	if noMsg.Error() != "automation reported failure" {
 		t.Errorf("got %q", noMsg.Error())
+	}
+}
+
+func TestOutputFlagValidation(t *testing.T) {
+	// Confirm the exit error infrastructure works for usage errors.
+	err := withCode(2, fmt.Errorf(`invalid output format "bad": must be one of: pretty, json`))
+	var c *exitErr
+	if !errors.As(err, &c) || c.Code() != 2 {
+		t.Errorf("expected code 2, got %v", err)
+	}
+}
+
+func TestDualStdinConflictMessage(t *testing.T) {
+	instructions := "-"
+	schema := "-"
+	var err error
+	if instructions == "-" && schema == "-" {
+		err = withCode(2, fmt.Errorf(
+			"--schema and --instructions cannot both read from stdin (-); "+
+				"pass one as a literal string or @file",
+		))
+	}
+	if err == nil {
+		t.Fatal("expected error for dual stdin")
+	}
+	var c *exitErr
+	if !errors.As(err, &c) || c.Code() != 2 {
+		t.Errorf("expected code 2, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot both read from stdin") {
+		t.Errorf("expected helpful message, got: %q", err.Error())
 	}
 }

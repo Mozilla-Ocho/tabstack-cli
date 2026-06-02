@@ -190,13 +190,64 @@ func TestStreamingNon2xxIsAPIError(t *testing.T) {
 	}
 }
 
-func TestDoJSONNilOutDiscards(t *testing.T) {
+func TestAutomateInputRequestBody(t *testing.T) {
+	var gotBody []byte
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"ignored":true}`)
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"status":"accepted"}`)
 	})
-	err := c.AutomateInput(context.Background(), "req-1", AutomateInputRequest{Data: "x"})
+
+	req := AutomateInputRequest{
+		Fields: []AutomateInputFieldValue{
+			{Ref: "email", Value: "test@example.com"},
+		},
+	}
+	err := c.AutomateInput(context.Background(), "req-abc", req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotBody), `"fields"`) {
+		t.Errorf("body missing 'fields' key: %s", gotBody)
+	}
+	if strings.Contains(string(gotBody), `"data"`) {
+		t.Errorf("body still contains old 'data' key: %s", gotBody)
+	}
+}
+
+func TestAutomateInputCancelled(t *testing.T) {
+	var gotBody []byte
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"status":"accepted"}`)
+	})
+
+	if err := c.AutomateInput(context.Background(), "req-xyz", AutomateInputRequest{Cancelled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotBody), `"cancelled":true`) {
+		t.Errorf("body missing cancelled: %s", gotBody)
+	}
+}
+
+func TestAutomateInputPathEscaping(t *testing.T) {
+	var gotRawPath string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		// RawPath preserves percent-encoding; Path is always decoded by the
+		// stdlib router, so we must check RawPath to confirm the slashes were
+		// escaped before the request was sent.
+		gotRawPath = r.URL.RawPath
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"status":"accepted"}`)
+	})
+
+	_ = c.AutomateInput(context.Background(), "id/with/slashes", AutomateInputRequest{Cancelled: true})
+	if strings.Contains(gotRawPath, "id/with/slashes") {
+		t.Errorf("requestID slashes were not escaped: raw path = %s", gotRawPath)
+	}
+	if !strings.Contains(gotRawPath, "id%2Fwith%2Fslashes") {
+		t.Errorf("requestID not percent-encoded in raw path: raw path = %s", gotRawPath)
 	}
 }
 

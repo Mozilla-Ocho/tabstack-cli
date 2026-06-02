@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -34,6 +35,9 @@ func newExtractMarkdownCmd() *cobra.Command {
 		Short: "Convert a URL's content to clean Markdown",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validEffort(effort); err != nil {
+				return withCode(2, err)
+			}
 			req := client.ExtractMarkdownRequest{
 				URL:       args[0],
 				Effort:    client.Effort(effort),
@@ -75,6 +79,12 @@ func newExtractJSONCmd() *cobra.Command {
 			"file, or - to read from stdin.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if schema == "" {
+				return withCode(2, fmt.Errorf("required: --schema (JSON schema as literal string, @file, or -)"))
+			}
+			if err := validEffort(effort); err != nil {
+				return withCode(2, err)
+			}
 			schemaJSON, err := readJSON(schema)
 			if err != nil {
 				return withCode(2, err)
@@ -101,7 +111,6 @@ func newExtractJSONCmd() *cobra.Command {
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
-	_ = cmd.MarkFlagRequired("schema")
 
 	return cmd
 }

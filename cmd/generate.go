@@ -60,6 +60,10 @@ func newGenerateJSONCmd() *cobra.Command {
 				return withCode(2, err)
 			}
 
+			if err := validEffort(effort); err != nil {
+				return withCode(2, err)
+			}
+
 			req := client.GenerateJSONRequest{
 				Instructions: instr,
 				JSONSchema:   schemaJSON,
