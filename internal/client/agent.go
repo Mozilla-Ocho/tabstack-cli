@@ -14,6 +14,7 @@ type AutomateRequest struct {
 	Data                  any        `json:"data,omitempty"`
 	GeoTarget             *GeoTarget `json:"geo_target,omitempty"`
 	Guardrails            string     `json:"guardrails,omitempty"`
+	Interactive           bool       `json:"interactive,omitempty"`
 	MaxIterations         int        `json:"maxIterations,omitempty"`
 	MaxValidationAttempts int        `json:"maxValidationAttempts,omitempty"`
 	URL                   string     `json:"url,omitempty"`
@@ -58,8 +59,8 @@ type Citation struct {
 }
 
 // ResearchMode selects how much work the research endpoint does.
-//   - "fast": quick answers, minimal searches
-//   - "balanced": standard multi-iteration research (default)
+//   - "fast": quick answers, minimal searches (default)
+//   - "balanced": standard multi-iteration research
 type ResearchMode string
 
 const (
