@@ -25,11 +25,11 @@ Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/vet/b
 
 Three layers, each in its own package:
 
-- **`cmd/tabstack/main.go`** — entry point; builds the root command, runs it, and maps errors to process exit codes. It checks for any error implementing `Code() int` (the `coded` interface) and exits with that code, else 1. (Lives in its own dir so `go install .../cmd/tabstack` produces a `tabstack` binary.)
-- **`cmd/`** — Cobra command tree, one file per endpoint group (`agent`, `extract`, `generate`, `auth`). Each leaf command only builds its request and calls the client.
-- **`internal/client/`** — the HTTP client and per-endpoint request/response types.
-- **`internal/config/`** — credential and base-URL resolution.
-- **`internal/ui/`** — output rendering (pretty vs JSON), styles, spinner.
+- **`cmd/tabstack/main.go`**: entry point; builds the root command, runs it, and maps errors to process exit codes. It checks for any error implementing `Code() int` (the `coded` interface) and exits with that code, else 1. (Lives in its own dir so `go install .../cmd/tabstack` produces a `tabstack` binary.)
+- **`cmd/`**: Cobra command tree, one file per endpoint group (`agent`, `extract`, `generate`, `auth`). Each leaf command only builds its request and calls the client.
+- **`internal/client/`**: the HTTP client and per-endpoint request/response types.
+- **`internal/config/`**: credential and base-URL resolution.
+- **`internal/ui/`**: output rendering (pretty vs JSON), styles, spinner.
 
 ### Shared app context
 
@@ -43,8 +43,8 @@ Three layers, each in its own package:
 
 The client splits on transport, not endpoint:
 
-- **`doJSON`** — single JSON request/response. Used by `extract/json`, `extract/markdown`, `generate/json`, `automate/{id}/input`. Schema-driven endpoints (`extract/json`, `generate/json`) return `json.RawMessage` verbatim because the response shape is caller-defined by the supplied JSON schema.
-- **`doStream`** — Server-Sent Events. Used by `automate` and `research`. Deliberately imposes **no** client timeout (a hard timeout would cut the stream); cancellation flows through `context`. `--timeout` only affects non-streaming calls.
+- **`doJSON`**: single JSON request/response. Used by `extract/json`, `extract/markdown`, `generate/json`, `automate/{id}/input`. Schema-driven endpoints (`extract/json`, `generate/json`) return `json.RawMessage` verbatim because the response shape is caller-defined by the supplied JSON schema.
+- **`doStream`**: Server-Sent Events. Used by `automate` and `research`. Deliberately imposes **no** client timeout (a hard timeout would cut the stream); cancellation flows through `context`. `--timeout` only affects non-streaming calls.
 
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
 
@@ -55,9 +55,9 @@ Streaming endpoints signal failure **in-band** (a `task:completed`/`complete` ev
 ### Exit codes (scriptability)
 
 `cmd/helpers.go` defines `exitErr{code, err}` and `classifyError`:
-- **1** — runtime/network error
-- **2** — usage error (cobra default; also `withCode(2, ...)` for local input validation)
-- **3** — API error (`client.APIError`) or in-band stream failure
+- **1**: runtime/network error
+- **2**: usage error (cobra default; also `withCode(2, ...)` for local input validation)
+- **3**: API error (`client.APIError`) or in-band stream failure
 
 ### Output modes
 
@@ -65,7 +65,7 @@ Streaming endpoints signal failure **in-band** (a `task:completed`/`complete` ev
 
 ### Input ergonomics
 
-`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin — mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
+`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
 
 ## Conventions
 

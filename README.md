@@ -1,6 +1,6 @@
 # tabstack
 
-> Browser automation, web research, and structured extraction from any URL — straight from your terminal.
+> Every web interaction your agent or stack needs: browser automation, web research, and structured extraction from any URL.
 
 [![CI](https://github.com/Mozilla-Ocho/tabstack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Mozilla-Ocho/tabstack-cli/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Mozilla-Ocho/tabstack-cli.svg)](https://pkg.go.dev/github.com/Mozilla-Ocho/tabstack-cli)
@@ -8,9 +8,10 @@
 [![Release](https://img.shields.io/github/v/release/Mozilla-Ocho/tabstack-cli?include_prereleases&sort=semver)](https://github.com/Mozilla-Ocho/tabstack-cli/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`tabstack` is a small, fast CLI client for the [Tabstack AI API](https://tabstack.ai).
+`tabstack` is a single-binary CLI client for the [Tabstack AI API](https://tabstack.ai):
+every web interaction your agent or stack needs, from the terminal or a script.
 It turns any URL into clean Markdown or schema-shaped JSON, runs natural-language
-browser automation, and answers research questions with cited sources — all with
+browser automation, and answers research questions with cited sources, all with
 output that's pretty in a terminal and pipeable into `jq`.
 
 ```console
@@ -40,21 +41,21 @@ This domain is for use in illustrative examples in documents...
 
 ## Features
 
-- **Extract** — convert any page to clean Markdown, or pull structured data shaped by your own JSON schema.
-- **Generate** — fetch a page and transform it with AI into the JSON shape you describe.
-- **Automate** — run natural-language browser tasks server-side, streaming progress as they go.
-- **Research** — search the web, synthesise an answer, and print it with numbered, cited sources.
-- **Scriptable** — pretty output on a TTY, JSON when piped; meaningful exit codes for branching in scripts.
-- **No dependencies to run** — a single static Go binary; pre-built for macOS, Linux, and Windows.
+- **Extract**: convert any page to clean Markdown, or pull structured data shaped by your own JSON schema.
+- **Generate**: fetch a page and transform it with AI into the JSON shape you describe.
+- **Automate**: run natural-language browser tasks server-side, streaming progress as they go.
+- **Research**: search the web, synthesise an answer, and print it with numbered, cited sources.
+- **Scriptable**: pretty output on a TTY, JSON when piped; meaningful exit codes for branching in scripts.
+- **No dependencies to run**: a single static Go binary; pre-built for macOS, Linux, and Windows.
 
 ## Install
 
-**macOS / Linux — quickest:**
+**macOS / Linux, quickest:**
 
 ```bash
 git clone https://github.com/Mozilla-Ocho/tabstack-cli.git
 cd tabstack-cli
-make install-local   # builds and copies to /usr/local/bin — works in any terminal immediately
+make install-local   # builds and copies to /usr/local/bin, works in any terminal immediately
 ```
 
 **Pre-built binaries** (no Go required) are on the
@@ -96,6 +97,8 @@ A key can come from three sources, highest precedence first:
 1. `--api-key` flag
 2. `TABSTACK_API_KEY` environment variable
 3. config file at `$XDG_CONFIG_HOME/tabstack/config.toml` (defaults to `~/.config/tabstack/config.toml`, written `0600`)
+
+If no key is found, API commands exit `2` with guidance on setting one.
 
 The base URL can likewise be set with `--base-url` or `TABSTACK_BASE_URL`.
 
@@ -151,12 +154,12 @@ tabstack agent input <request-id> --data '{"fields":[{"ref":"field1","value":"ye
 tabstack agent input <request-id> --data '{"cancelled":true}'
 ```
 
-`agent input` only applies to runs started with `--interactive` — without that
+`agent input` only applies to runs started with `--interactive`. Without that
 flag an automation never pauses for input.
 
 ## Common options
 
-**Input values** — `--schema`, `--instructions`, and `--data` each accept a
+**Input values**: `--schema`, `--instructions`, and `--data` each accept a
 literal string, `@file` to read from a file, or `-` to read from stdin (the same
 ergonomics as `curl -d`):
 
@@ -164,7 +167,7 @@ ergonomics as `curl -d`):
 echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 ```
 
-**`--effort`** (`extract`, `generate`) — the speed/capability tradeoff when fetching:
+**`--effort`** (`extract`, `generate`): the speed/capability tradeoff when fetching:
 
 | Value | Behaviour |
 |-------|-----------|
@@ -172,9 +175,9 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `standard` | Balanced, default (~3–15s) |
 | `max` | Full browser rendering for JS-heavy sites (~15–60s) |
 
-**`--geo <CC>`** — route the fetch through a given country (ISO 3166-1 alpha-2, e.g. `GB`, `US`, `JP`).
+**`--geo <CC>`**: route the fetch through a given country (ISO 3166-1 alpha-2, e.g. `GB`, `US`, `JP`).
 
-**`--nocache`** — bypass the cache and fetch fresh.
+**`--nocache`**: bypass the cache and fetch fresh.
 
 **Global flags** (valid on every command):
 
@@ -202,7 +205,7 @@ NDJSON line per event in JSON mode.
 > **Note:** streaming events are parsed with a 4&nbsp;MB per-event buffer. A
 > single event whose payload exceeds that (e.g. an extremely large extracted
 > page in one frame) ends the stream with a parse error. This is well above
-> normal event sizes; raise the limit in `internal/client/sse.go` if you hit it.
+> normal event sizes; if you hit it, build from source with a larger SSE buffer.
 
 ## Exit codes
 
@@ -210,10 +213,10 @@ NDJSON line per event in JSON mode.
 |------|---------|
 | `0`  | success |
 | `1`  | runtime / network error |
-| `2`  | usage / invalid input |
+| `2`  | usage / invalid input or missing config (e.g. no API key) |
 | `3`  | API error or in-band task failure |
 
-These make the CLI scriptable — branch on the exit status to tell a bad request
+These make the CLI scriptable: branch on the exit status to tell a bad request
 from a network failure from an API rejection:
 
 ```bash
@@ -230,7 +233,7 @@ fi
 
 `tabstack` is designed to be driven by LLM agents as well as humans. If you're
 wiring it into an agent (Claude Code, a custom harness, etc.), point the agent at
-[AGENTS.md](AGENTS.md) — it documents every command, flag, and exit code in a
+[AGENTS.md](AGENTS.md). It documents every command, flag, and exit code in a
 form tuned for machine consumption.
 
 ## Development
@@ -248,7 +251,7 @@ described in [openapi.yaml](openapi.yaml).
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). This project
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). This project
 follows the [Mozilla Community Participation Guidelines](CODE_OF_CONDUCT.md). To
 report a security issue, see [SECURITY.md](SECURITY.md).
 

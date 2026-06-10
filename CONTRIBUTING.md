@@ -25,10 +25,10 @@ make smoke      # live API smoke test (needs an API key)
 
 Before opening a pull request:
 
-- Run `make lint` and `make test` — CI runs the same checks (`gofmt`, `go vet`,
+- Run `make lint` and `make test`: CI runs the same checks (`gofmt`, `go vet`,
   `go build`, `go test -race`) and must pass.
 - Add or update tests for behaviour you change. Network code is testable via
-  `client.WithHTTPClient` (inject an `httptest` server) — no live calls in unit
+  `client.WithHTTPClient` (inject an `httptest` server). No live calls in unit
   tests.
 - Keep commits focused and write a clear description of the *why*.
 

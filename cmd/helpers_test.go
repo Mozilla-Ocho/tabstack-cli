@@ -121,6 +121,39 @@ func TestWithCode(t *testing.T) {
 	}
 }
 
+func TestCheckLen(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		max     int
+		wantErr bool
+	}{
+		{"empty", "", 3, false},
+		{"ascii under", "ab", 3, false},
+		{"ascii at cap", "abc", 3, false},
+		{"ascii over", "abcd", 3, true},
+		// "世界語" is 3 runes but 9 bytes: a byte-based check would wrongly
+		// reject it at max=3. checkLen must count runes.
+		{"multibyte at cap", "世界語", 3, false},
+		{"multibyte over", "世界語", 2, true},
+	}
+	for _, tc := range cases {
+		err := checkLen("query", tc.value, tc.max)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("%s: expected error", tc.name)
+				continue
+			}
+			var c *exitErr
+			if !errors.As(err, &c) || c.Code() != 2 {
+				t.Errorf("%s: want exit code 2, got %v", tc.name, err)
+			}
+		} else if err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+		}
+	}
+}
+
 func TestClassifyError(t *testing.T) {
 	if classifyError(nil) != nil {
 		t.Error("nil should classify to nil")

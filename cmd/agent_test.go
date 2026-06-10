@@ -96,7 +96,7 @@ func TestAutomateIterationBounds(t *testing.T) {
 		maxValidation int
 		wantErr       bool
 	}{
-		{0, 0, false},    // not set — server default
+		{0, 0, false},    // not set, server default
 		{1, 1, false},    // minimum valid
 		{100, 10, false}, // maximum valid
 		{-1, 0, true},

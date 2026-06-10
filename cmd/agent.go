@@ -263,8 +263,8 @@ func newResearchCmd() *cobra.Command {
 			if err := validResearchMode(mode); err != nil {
 				return withCode(2, err)
 			}
-			if len(args[0]) > maxQueryLen {
-				return withCode(2, fmt.Errorf("query exceeds the %d character limit (got %d)", maxQueryLen, len(args[0])))
+			if err := checkLen("query", args[0], maxQueryLen); err != nil {
+				return err
 			}
 			req := client.ResearchRequest{
 				Query:        args[0],
@@ -306,8 +306,8 @@ func newInputCmd() *cobra.Command {
 		Long: "When an automation task pauses to ask for input, submit the response\n" +
 			"with this command using the request ID from the automation stream.\n\n" +
 			"The --data payload must be a JSON object:\n" +
-			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  — to provide values\n" +
-			"  {\"cancelled\":true}                                — to decline",
+			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  to provide values\n" +
+			"  {\"cancelled\":true}                                to decline",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
@@ -325,7 +325,7 @@ func newInputCmd() *cobra.Command {
 			if len(req.Fields) == 0 && !req.Cancelled {
 				return withCode(2, fmt.Errorf(
 					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
-						"got neither — unknown keys are ignored by the API",
+						"got neither, unknown keys are ignored by the API",
 				))
 			}
 

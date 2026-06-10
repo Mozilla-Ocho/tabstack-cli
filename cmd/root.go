@@ -117,7 +117,9 @@ func setupApp() error {
 		return fmt.Errorf("load configuration: %w", err)
 	}
 	if cfg.APIKey == "" {
-		return fmt.Errorf("no API key found. Set one with `tabstack auth login`, the %s environment variable, or --api-key", "TABSTACK_API_KEY")
+		// Missing key is a configuration error, not transient: exit 2 so agents
+		// treat it as non-retryable rather than retrying with backoff (exit 1).
+		return withCode(2, fmt.Errorf("no API key found. Set one with `tabstack auth login`, the %s environment variable, or --api-key", "TABSTACK_API_KEY"))
 	}
 
 	renderer, err := newRenderer()

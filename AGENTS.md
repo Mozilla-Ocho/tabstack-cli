@@ -1,7 +1,7 @@
 # Using `tabstack` from an AI agent
 
 This document tells an LLM agent how to drive the `tabstack` CLI correctly. It is
-a reference, not a tutorial — every command, flag, input format, output shape,
+a reference, not a tutorial: every command, flag, input format, output shape,
 and failure mode is listed so you can call the tool without guessing.
 
 ## TL;DR for agents
@@ -11,9 +11,9 @@ and failure mode is listed so you can call the tool without guessing.
 - Provide an API key via the **`TABSTACK_API_KEY`** env var (preferred for
   automation) or `--api-key`. Do not rely on an interactive `auth login` prompt.
 - **Branch on the exit code**, not on stderr text: `0` ok, `1` runtime/network,
-  `2` bad input, `3` API error or task failure.
+  `2` bad input or missing key, `3` API error or task failure.
 - `extract json` / `generate json` return **exactly the JSON shape your schema
-  describes** — nothing is wrapped or reshaped. Validate your schema before
+  describes**. Nothing is wrapped or reshaped. Validate your schema before
   calling; malformed schemas fail locally with exit `2`.
 - `automate` and `research` **stream**. In `-o json` they emit **NDJSON** (one
   JSON object per line); read line by line, do not `JSON.parse` the whole output.
@@ -28,7 +28,7 @@ export TABSTACK_BASE_URL="<url>"       # override API root
 
 Key resolution precedence (highest first): `--api-key` flag → `TABSTACK_API_KEY`
 → config file (`~/.config/tabstack/config.toml`). If no key is found, commands
-that hit the API exit `1` with a clear message.
+that hit the API exit `2` (non-retryable config error) with a clear message.
 
 ## Global flags (valid on every command)
 
@@ -53,7 +53,7 @@ with exit `2` and no network call.
 
 ## Commands
 
-### `extract markdown <url>` — page → clean Markdown
+### `extract markdown <url>`: page → clean Markdown
 
 Non-streaming. Single JSON response.
 
@@ -75,7 +75,7 @@ Example:
 tabstack -o json extract markdown https://example.com --metadata
 ```
 
-### `extract json <url> --schema …` — page → schema-shaped JSON
+### `extract json <url> --schema …`: page → schema-shaped JSON
 
 Non-streaming. **The response is exactly your schema's shape**, returned verbatim.
 
@@ -90,7 +90,7 @@ tabstack -o json extract json https://example.com \
   --schema '{"type":"object","properties":{"title":{"type":"string"}}}'
 ```
 
-### `generate json <url> --instructions … --schema …` — fetch + AI transform → schema-shaped JSON
+### `generate json <url> --instructions … --schema …`: fetch + AI transform → schema-shaped JSON
 
 Non-streaming. Fetches the page, then transforms its content with AI per your
 instructions into the schema shape. Response is your schema's shape, verbatim.
@@ -111,7 +111,7 @@ tabstack -o json generate json https://example.com \
   --schema @out-schema.json
 ```
 
-### `agent automate <task>` — natural-language browser automation (streaming)
+### `agent automate <task>`: natural-language browser automation (streaming)
 
 Runs server-side and **streams events**. The task description is the positional
 argument.
@@ -126,7 +126,7 @@ argument.
 | `--geo <CC>` | no | Geotarget country code. |
 | `--interactive` | no | Allow the task to **pause and request input** mid-run (see `agent input`). |
 
-Output (`-o json`): NDJSON, one event per line. Event names include `start`,
+Output (`-o json`): NDJSON, one event per line. Event names include `task:started`,
 `agent:processing`, `browser:navigated`, `agent:extracted`, `task:completed`,
 `complete`, `done`, and `error`. Read incrementally.
 
@@ -139,7 +139,7 @@ Example:
 tabstack -o json agent automate "Find the Pro plan price" --url https://example.com
 ```
 
-### `agent input <request-id> --data …` — answer a paused automation
+### `agent input <request-id> --data …`: answer a paused automation
 
 Non-streaming. Use **only** when an `--interactive` automation emitted an event
 asking for input; take the request ID from that event.
@@ -154,7 +154,7 @@ Setting neither `fields` nor `cancelled` exits `2`.
 tabstack agent input req_abc123 --data '{"fields":[{"ref":"otp","value":"123456"}]}'
 ```
 
-### `agent research <query>` — web research with citations (streaming)
+### `agent research <query>`: web research with citations (streaming)
 
 Streams events, then prints a synthesised answer with numbered sources.
 
@@ -168,7 +168,13 @@ The query is the positional argument, max **10,000** chars (validated locally).
 Same in-band failure semantics as `automate` (exit `3` on failure).
 
 Output (`-o json`): NDJSON event stream; the `complete` event carries the final
-answer and a `metadata.citedPages` list (the sources, in citation order).
+answer and (when present) a `metadata.citedPages` list (the sources, in citation
+order). Research terminates on `complete` (or `error`); it has **no** `done`
+event, unlike `automate`. Waiting for `done` will hang.
+
+`metadata.citedPages` is **optional** and is omitted in `fast` mode (the
+default), so a default call may return no sources. Agents that need citations
+should pass `--mode balanced` and null-guard `citedPages` before reading it.
 
 ```bash
 tabstack -o json agent research "latest developments in quantum computing" --mode balanced
@@ -176,10 +182,10 @@ tabstack -o json agent research "latest developments in quantum computing" --mod
 
 ### `auth login` / `auth status`
 
-- `auth login` — interactive (prompts for a hidden key) unless `--key <key>` is
+- `auth login`: interactive (prompts for a hidden key) unless `--key <key>` is
   passed; saves to the config file. **Agents should prefer `TABSTACK_API_KEY`**
   and skip this entirely.
-- `auth status` — reports whether a key is configured and its source; never
+- `auth status`: reports whether a key is configured and its source; never
   prints the key. Works without a key present.
 
 ## Effort levels (`extract`, `generate`)
@@ -198,8 +204,8 @@ most expensive.
 | Code | Meaning | Agent action |
 |------|---------|--------------|
 | `0` | success | proceed |
-| `1` | runtime / network error | retry with backoff; check connectivity, key, timeout |
-| `2` | usage / invalid input | **fix the command** — bad flag, missing required arg, malformed JSON, out-of-range value. Do not retry unchanged. |
+| `1` | runtime / network error | retry with backoff; check connectivity, timeout. |
+| `2` | usage / invalid input or missing config | **fix the command**: bad flag, missing required arg, malformed JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
 | `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. |
 
 Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
@@ -208,8 +214,8 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
 
 - **`extract json` / `generate json` never wrap the result.** You get exactly the
   shape your schema defines. Don't expect an envelope.
-- **A 422-class rejection means the input was unprocessable** (bad URL, schema, or
-  task) — exit `3`. Retrying with higher `--effort` will **not** fix it; fix the
+- **A 4xx rejection (typically 400) means the input was unprocessable** (bad URL, schema, or
+  task): exit `3`. Retrying with higher `--effort` will **not** fix it; fix the
   input. Higher effort/`--nocache` only helps transient fetch problems.
 - **Streaming output is NDJSON, not a single JSON document.** Parse per line.
 - **`--timeout` does not apply to `automate`/`research`** (a hard timeout would cut
