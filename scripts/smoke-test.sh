@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# smoke-test.sh — exercise every tabstack command against the live API.
+# smoke-test.sh: exercise every tabstack command against the live API.
 #
 # Requires a valid API key (TABSTACK_API_KEY env var, --api-key, or a saved
 # config file via `tabstack auth login`).

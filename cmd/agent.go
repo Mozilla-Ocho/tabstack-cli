@@ -14,6 +14,11 @@ import (
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
+// maxQueryLen mirrors the server-side cap on the research query field. We
+// validate locally so an over-length query fails fast with a clear message
+// rather than coming back as an opaque API 400.
+const maxQueryLen = 10000
+
 // newAgentCmd is the parent for the /automate, /automate/{id}/input, and
 // /research endpoints. automate and research stream Server-Sent Events; input
 // is a plain request/response.
@@ -172,6 +177,7 @@ func newAutomateCmd() *cobra.Command {
 		maxIter       int
 		maxValidation int
 		geo           string
+		interactive   bool
 	)
 
 	cmd := &cobra.Command{
@@ -181,7 +187,9 @@ func newAutomateCmd() *cobra.Command {
 			"The task runs server-side and streams progress events as it works:\n" +
 			"planning, navigation, extraction, and a final answer. Use --data to\n" +
 			"pass JSON context (literal, @file, or -) for form filling or complex\n" +
-			"workflows.",
+			"workflows.\n\n" +
+			"Pass --interactive to let the task pause and request input mid-run; when\n" +
+			"it does, respond with `tabstack agent input <request-id>`.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
@@ -197,6 +205,7 @@ func newAutomateCmd() *cobra.Command {
 				MaxValidationAttempts: maxValidation,
 				URL:                   url,
 				GeoTarget:             geoTarget(geo),
+				Interactive:           interactive,
 			}
 
 			// --data is optional freeform JSON context.
@@ -231,6 +240,7 @@ func newAutomateCmd() *cobra.Command {
 	f.IntVar(&maxIter, "max-iterations", 0, "maximum task iterations (1-100)")
 	f.IntVar(&maxValidation, "max-validation-attempts", 0, "maximum validation attempts (1-10)")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
+	f.BoolVar(&interactive, "interactive", false, "allow the task to pause and request input (answer with `agent input`)")
 
 	return cmd
 }
@@ -246,12 +256,15 @@ func newResearchCmd() *cobra.Command {
 		Use:   "research <query>",
 		Short: "Run an AI research query over the web (streams progress)",
 		Long: "Search the web, analyse sources, and synthesise an answer to a query.\n\n" +
-			"Progress streams through phases as the research runs. Use --mode fast\n" +
-			"for quick answers or balanced (default) for deeper multi-source work.",
+			"Progress streams through phases as the research runs. --mode fast\n" +
+			"(default) returns quick answers; balanced does deeper multi-source work.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validResearchMode(mode); err != nil {
 				return withCode(2, err)
+			}
+			if err := checkLen("query", args[0], maxQueryLen); err != nil {
+				return err
 			}
 			req := client.ResearchRequest{
 				Query:        args[0],
@@ -293,8 +306,8 @@ func newInputCmd() *cobra.Command {
 		Long: "When an automation task pauses to ask for input, submit the response\n" +
 			"with this command using the request ID from the automation stream.\n\n" +
 			"The --data payload must be a JSON object:\n" +
-			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  — to provide values\n" +
-			"  {\"cancelled\":true}                                — to decline",
+			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  to provide values\n" +
+			"  {\"cancelled\":true}                                to decline",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
@@ -312,7 +325,7 @@ func newInputCmd() *cobra.Command {
 			if len(req.Fields) == 0 && !req.Cancelled {
 				return withCode(2, fmt.Errorf(
 					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
-						"got neither — unknown keys are ignored by the API",
+						"got neither, unknown keys are ignored by the API",
 				))
 			}
 

@@ -231,6 +231,26 @@ func TestAutomateInputCancelled(t *testing.T) {
 	}
 }
 
+func TestAutomateRequestInteractiveOmitempty(t *testing.T) {
+	// Default (false) must be omitted so the server applies its own default;
+	// true must be sent so the task is allowed to pause for input.
+	off, err := json.Marshal(AutomateRequest{Task: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(off), "interactive") {
+		t.Errorf("interactive=false should be omitted: %s", off)
+	}
+
+	on, err := json.Marshal(AutomateRequest{Task: "t", Interactive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(on), `"interactive":true`) {
+		t.Errorf("interactive=true should be present: %s", on)
+	}
+}
+
 func TestAutomateInputPathEscaping(t *testing.T) {
 	var gotRawPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

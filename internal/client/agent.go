@@ -14,14 +14,16 @@ type AutomateRequest struct {
 	Data                  any        `json:"data,omitempty"`
 	GeoTarget             *GeoTarget `json:"geo_target,omitempty"`
 	Guardrails            string     `json:"guardrails,omitempty"`
+	Interactive           bool       `json:"interactive,omitempty"`
 	MaxIterations         int        `json:"maxIterations,omitempty"`
 	MaxValidationAttempts int        `json:"maxValidationAttempts,omitempty"`
 	URL                   string     `json:"url,omitempty"`
 }
 
 // Automate runs an AI browser-automation task, invoking fn for each streamed
-// event (start, agent:processing, browser:navigated, agent:extracted,
-// task:completed, complete, done). Cancellation flows through ctx.
+// event (task:setup, task:trace_context, task:started, agent:processing,
+// browser:navigated, agent:extracted, task:completed, complete, done).
+// Cancellation flows through ctx.
 func (c *Client) Automate(ctx context.Context, req AutomateRequest, fn func(Event) error) error {
 	return c.doStream(ctx, "/automate", req, fn)
 }
@@ -58,8 +60,8 @@ type Citation struct {
 }
 
 // ResearchMode selects how much work the research endpoint does.
-//   - "fast": quick answers, minimal searches
-//   - "balanced": standard multi-iteration research (default)
+//   - "fast": quick answers, minimal searches (default)
+//   - "balanced": standard multi-iteration research
 type ResearchMode string
 
 const (

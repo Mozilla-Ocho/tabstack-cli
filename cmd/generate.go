@@ -57,8 +57,8 @@ func newGenerateJSONCmd() *cobra.Command {
 			if instr == "" {
 				return withCode(2, fmt.Errorf("--instructions is required"))
 			}
-			if len(instr) > maxInstructionsLen {
-				return withCode(2, fmt.Errorf("instructions exceed the %d character limit (got %d)", maxInstructionsLen, len(instr)))
+			if err := checkLen("instructions", instr, maxInstructionsLen); err != nil {
+				return err
 			}
 
 			schemaJSON, err := readJSON(schema)

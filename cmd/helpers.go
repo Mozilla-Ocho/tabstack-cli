@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 )
@@ -44,7 +45,7 @@ func classifyError(err error) error {
 		return withCode(3, err)
 	}
 	if isTimeoutError(err) {
-		return withCode(1, fmt.Errorf("request timed out — check your network connection, or for non-streaming commands increase --timeout (e.g. --timeout 30s)"))
+		return withCode(1, fmt.Errorf("request timed out. Check your network connection, or for non-streaming commands increase --timeout (e.g. --timeout 30s)"))
 	}
 	return withCode(1, err)
 }
@@ -69,6 +70,16 @@ func validResearchMode(mode string) error {
 	default:
 		return fmt.Errorf("invalid mode %q: must be one of: fast, balanced", mode)
 	}
+}
+
+// checkLen enforces a server-side character cap locally. It counts runes, not
+// bytes, so multibyte input (CJK, emoji, accents) is measured the way the limit
+// is documented. Returns a usage error (exit 2) when over the cap.
+func checkLen(field, value string, max int) error {
+	if n := utf8.RuneCountInString(value); n > max {
+		return withCode(2, fmt.Errorf("%s exceeds the %d character limit (got %d)", field, max, n))
+	}
+	return nil
 }
 
 // isTimeoutError detects context deadline exceeded and net-level timeouts.
