@@ -25,7 +25,7 @@ Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/vet/b
 
 Three layers, each in its own package:
 
-- **`cmd/tabstack/main.go`**: entry point; builds the root command, runs it, and maps errors to process exit codes. It checks for any error implementing `Code() int` (the `coded` interface) and exits with that code, else 1. (Lives in its own dir so `go install .../cmd/tabstack` produces a `tabstack` binary.)
+- **`cmd/tabstack/main.go`**: entry point; builds the root command and runs it through `fang.Execute` (charmbracelet/fang), which renders styled help, errors, version output, and adds `completion`/`man` subcommands. fang prints errors itself and returns them, so main keeps owning the exit-code mapping: it checks for any error implementing `Code() int` (the `coded` interface) and exits with that code, else maps cobra usage errors to 2, else 1. Version is handed to fang via `cmd.Version()` (stamped by `-ldflags`). (Lives in its own dir so `go install .../cmd/tabstack` produces a `tabstack` binary.)
 - **`cmd/`**: Cobra command tree, one file per endpoint group (`agent`, `extract`, `generate`, `schema`, `auth`). Each leaf command only builds its request and calls the client.
 - **`internal/client/`**: the HTTP client and per-endpoint request/response types.
 - **`internal/schemas/`**: fetches the public `tabstack-schemas` GitHub repo and manages the local schema store (`schema pull`/`schema list`). Kept separate from `client`: it talks to `raw.githubusercontent.com` unauthenticated, so it must never see the API bearer token. Mirrors `client`'s injectable-`http.Client` pattern (`schemas.WithHTTPClient`) for tests.
