@@ -70,6 +70,7 @@ func NewRootCmd() *cobra.Command {
 		newAgentCmd(),
 		newExtractCmd(),
 		newGenerateCmd(),
+		newSchemaCmd(),
 		newAuthCmd(),
 	)
 

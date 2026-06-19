@@ -30,6 +30,8 @@ func newGenerateJSONCmd() *cobra.Command {
 	var (
 		instructions string
 		schema       string
+		schemaName   string
+		storage      string
 		effort       string
 		geo          string
 		nocache      bool
@@ -40,8 +42,9 @@ func newGenerateJSONCmd() *cobra.Command {
 		Short: "Transform a URL's content into structured JSON",
 		Long: "Fetch a URL, extract its content, then transform it with AI per your\n" +
 			"instructions into the shape described by a JSON schema.\n\n" +
-			"Both --instructions and --schema accept a literal string, @file, or -\n" +
-			"for stdin. Only one of them can read stdin in a single invocation.",
+			"--instructions and --schema accept a literal string, @file, or - for\n" +
+			"stdin (only one may read stdin per invocation). Alternatively reference a\n" +
+			"schema you pulled with `tabstack schema pull` via --schema-name.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if instructions == "-" && schema == "-" {
@@ -61,9 +64,9 @@ func newGenerateJSONCmd() *cobra.Command {
 				return err
 			}
 
-			schemaJSON, err := readJSON(schema)
+			schemaJSON, err := resolveSchemaArg(schema, schemaName, storage)
 			if err != nil {
-				return withCode(2, err)
+				return err
 			}
 
 			if err := validEffort(effort); err != nil {
@@ -89,10 +92,13 @@ func newGenerateJSONCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&instructions, "instructions", "", "transform instructions: literal, @file, or - (required)")
-	f.StringVar(&schema, "schema", "", "output JSON schema: literal, @file, or - (required)")
+	f.StringVar(&schema, "schema", "", "output JSON schema: literal, @file, or - for stdin")
+	f.StringVar(&schemaName, "schema-name", "", "name of a pulled schema to use (see `tabstack schema pull`)")
+	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,91 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/schemas"
 )
+
+// resolveSchemaArg returns the JSON schema bytes for the schema-driven commands
+// (`extract json`, `generate json`). The schema comes from either an inline
+// --schema spec (literal, @file, or -) or a --schema-name reference into the
+// local schema store; the two are mutually exclusive and exactly one is
+// required. Returns coded errors so the caller can return them verbatim.
+func resolveSchemaArg(schema, schemaName, storage string) (json.RawMessage, error) {
+	switch {
+	case schema != "" && schemaName != "":
+		return nil, withCode(2, errors.New("--schema and --schema-name are mutually exclusive"))
+	case schema == "" && schemaName == "":
+		return nil, withCode(2, errors.New("required: --schema (literal, @file, or -) or --schema-name (a pulled schema)"))
+	}
+
+	if schemaName == "" {
+		raw, err := readJSON(schema)
+		if err != nil {
+			return nil, withCode(2, err)
+		}
+		return raw, nil
+	}
+
+	dir, err := schemaStoreDir(storage)
+	if err != nil {
+		return nil, withCode(1, err)
+	}
+	rel, err := schemas.FindLocal(dir, schemaName)
+	if err != nil {
+		return nil, withCode(2, err)
+	}
+	data, _, err := schemas.Read(dir, rel)
+	if err != nil {
+		return nil, withCode(1, err)
+	}
+	if !json.Valid(data) {
+		return nil, withCode(2, fmt.Errorf("stored schema %s is not valid JSON", rel))
+	}
+	return json.RawMessage(data), nil
+}
+
+// schemaStoreDir resolves the schema store directory: the --storage override
+// when set, otherwise the default config location.
+func schemaStoreDir(storage string) (string, error) {
+	if storage != "" {
+		return storage, nil
+	}
+	return config.SchemasDir()
+}
+
+// errNotTerminal signals that an interactive prompt was requested but stdin is
+// not a TTY. Callers convert this into a safe non-interactive default rather
+// than blocking forever on input that will never arrive.
+var errNotTerminal = errors.New("not a terminal")
+
+// promptChoice asks the user to pick one of a set of single-letter options. keys
+// is the set of accepted lowercase letters (e.g. "okq"); an empty line returns
+// def. Prompts and re-prompts are written to stderr so stdout stays clean for
+// piping. It returns errNotTerminal when stdin is not interactive.
+func promptChoice(prompt, keys string, def byte) (byte, error) {
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return 0, errNotTerminal
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Fprint(os.Stderr, prompt)
+		line, err := reader.ReadString('\n')
+		if err != nil && line == "" {
+			return 0, err
+		}
+		line = strings.TrimSpace(strings.ToLower(line))
+		if line == "" && def != 0 {
+			return def, nil
+		}
+		if line != "" && strings.IndexByte(keys, line[0]) >= 0 {
+			return line[0], nil
+		}
+		fmt.Fprintf(os.Stderr, "Please answer with one of [%s].\n", strings.Join(strings.Split(keys, ""), "/"))
+	}
+}
 
 // exitErr wraps an error with a specific process exit code. main.go inspects
 // for this so different failure classes map to different codes, which makes the
