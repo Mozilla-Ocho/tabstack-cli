@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -90,8 +91,9 @@ func newSchemaPullCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "pull [selector...]",
-		Short: "Pull schemas from the library into a local store",
+		Use:         "pull [selector...]",
+		Short:       "Pull schemas from the library into a local store",
+		Annotations: map[string]string{"skipClient": "true"},
 		Long: "Pull one or more schemas into a local store (default\n" +
 			"$XDG_CONFIG_HOME/tabstack/schemas, or ~/.config/tabstack/schemas).\n\n" +
 			"A selector is a schema name (job-posting), a category (jobs), or a full\n" +
@@ -272,13 +274,22 @@ func selectTargets(idx schemas.Index, args []string, all bool) ([]schemas.Entry,
 // runPull fetches each target and reconciles it with the local store, prompting
 // on conflicts. It records what was pulled in the store manifest so `schema
 // status` can later distinguish local edits from upstream changes.
-func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets []schemas.Entry, force bool) error {
+func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets []schemas.Entry, force bool) (err error) {
 	r := rootApp.renderer
 
 	m, err := schemas.LoadManifest(dir)
 	if err != nil {
 		return withCode(1, err)
 	}
+	// Persist the manifest on every exit path so partial progress and backfilled
+	// hashes survive a mid-run failure. The save error only surfaces if nothing
+	// else already failed.
+	defer func() {
+		if saveErr := m.Save(dir); saveErr != nil && err == nil {
+			err = withCode(1, saveErr)
+		}
+	}()
+
 	stamp := time.Now().UTC().Format(time.RFC3339)
 
 	var pulled, current, kept int
@@ -287,20 +298,17 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 	for _, e := range targets {
 		remote, err := fetcher.Fetch(ctx, e.Path)
 		if err != nil {
-			_ = m.Save(dir)
 			return classifyError(err)
 		}
 
 		local, exists, err := schemas.Read(dir, e.Path)
 		if err != nil {
-			_ = m.Save(dir)
 			return withCode(1, err)
 		}
 
 		switch {
 		case !exists:
 			if err := schemas.Write(dir, e.Path, remote); err != nil {
-				_ = m.Save(dir)
 				return withCode(1, err)
 			}
 			record(e.Path, remote)
@@ -314,7 +322,6 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 
 		case force:
 			if err := schemas.Write(dir, e.Path, remote); err != nil {
-				_ = m.Save(dir)
 				return withCode(1, err)
 			}
 			record(e.Path, remote)
@@ -326,26 +333,20 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 				fmt.Sprintf("%s differs from the library. [o]verwrite, [k]eep, [q]uit? (k) ", e.Path),
 				"okq", 'k')
 			if err == errNotTerminal {
-				_ = m.Save(dir)
 				return withCode(2, fmt.Errorf("%s differs from the library; re-run with --force to overwrite, or pull to a clean directory", e.Path))
 			}
 			if err != nil {
-				_ = m.Save(dir)
 				return withCode(1, err)
 			}
 			switch action {
 			case 'o':
 				if err := schemas.Write(dir, e.Path, remote); err != nil {
-					_ = m.Save(dir)
 					return withCode(1, err)
 				}
 				record(e.Path, remote)
 				pulled++
 				fmt.Fprintf(r.Out, "%s updated %s\n", r.Styles.Success.Render("✓"), e.Path)
 			case 'q':
-				if err := m.Save(dir); err != nil {
-					return withCode(1, err)
-				}
 				fmt.Fprintln(r.Out, "Quit. No further schemas pulled.")
 				printPullSummary(pulled, current, kept)
 				return nil
@@ -356,9 +357,6 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 		}
 	}
 
-	if err := m.Save(dir); err != nil {
-		return withCode(1, err)
-	}
 	printPullSummary(pulled, current, kept)
 	return nil
 }
@@ -409,6 +407,11 @@ func computeStatus(ctx context.Context, dir string, fetcher *schemas.Fetcher) ([
 	}
 	sort.Strings(paths)
 
+	// Fetch every remote schema concurrently rather than in N serial round
+	// trips. A per-path error is kept (not discarded) so a failed check reads as
+	// "remote unknown" instead of silently passing for "up to date".
+	remotes := fetchRemotes(ctx, fetcher, paths)
+
 	rows := make([]statusRow, 0, len(paths))
 	for _, p := range paths {
 		entry, tracked := m.Schemas[p]
@@ -424,22 +427,61 @@ func computeStatus(ctx context.Context, dir string, fetcher *schemas.Fetcher) ([
 			rows = append(rows, statusRow{p, "untracked"})
 		default:
 			modified := schemas.CanonicalSHA(data) != entry.SHA256
-			outdated := false
+			outdated, remoteUnknown := false, false
 			if fetcher != nil {
-				if remote, err := fetcher.Fetch(ctx, p); err == nil {
-					outdated = schemas.CanonicalSHA(remote) != entry.SHA256
+				switch rr := remotes[p]; {
+				case rr.err != nil:
+					remoteUnknown = true
+				default:
+					outdated = schemas.CanonicalSHA(rr.data) != entry.SHA256
 				}
 			}
-			rows = append(rows, statusRow{p, statusLabel(modified, outdated)})
+			rows = append(rows, statusRow{p, statusLabel(modified, outdated, remoteUnknown)})
 		}
 	}
 
 	return rows, nil
 }
 
-// statusLabel renders the combined modified/outdated state.
-func statusLabel(modified, outdated bool) string {
+// remoteResult is one schema's fetched bytes or the error that prevented it.
+type remoteResult struct {
+	data []byte
+	err  error
+}
+
+// fetchRemotes fetches every path from the remote concurrently and returns the
+// results keyed by path. A nil fetcher (local-only mode) returns an empty map.
+func fetchRemotes(ctx context.Context, fetcher *schemas.Fetcher, paths []string) map[string]remoteResult {
+	out := make(map[string]remoteResult, len(paths))
+	if fetcher == nil {
+		return out
+	}
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for _, p := range paths {
+		wg.Add(1)
+		go func(p string) {
+			defer wg.Done()
+			data, err := fetcher.Fetch(ctx, p)
+			mu.Lock()
+			out[p] = remoteResult{data: data, err: err}
+			mu.Unlock()
+		}(p)
+	}
+	wg.Wait()
+	return out
+}
+
+// statusLabel renders the combined modified/outdated state. remoteUnknown marks
+// a schema whose remote check failed, so it is never mistaken for up to date.
+func statusLabel(modified, outdated, remoteUnknown bool) string {
 	switch {
+	case modified && remoteUnknown:
+		return "modified, remote unknown"
+	case remoteUnknown:
+		return "remote unknown"
 	case modified && outdated:
 		return "modified, outdated"
 	case modified:

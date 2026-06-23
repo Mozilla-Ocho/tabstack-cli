@@ -117,6 +117,33 @@ func (f *Fetcher) Fetch(ctx context.Context, schemaPath string) ([]byte, error) 
 	return f.get(ctx, f.rawBase+"/"+strings.TrimLeft(schemaPath, "/"))
 }
 
+// selectorKind classifies a parsed selector.
+type selectorKind int
+
+const (
+	selectorPath selectorKind = iota // explicit repo path, ".json" suffix ensured
+	selectorName                     // bare schema name, ".json" suffix trimmed
+)
+
+// parseSelector normalises a user selector into its kind and canonical value. A
+// selector containing a slash is an explicit repo path (".json" appended if
+// absent); otherwise it is a bare schema name (".json" trimmed). FindLocal
+// (offline) and Index.Resolve (online) share this parsing and differ only in
+// how they look the result up.
+func parseSelector(selector string) (selectorKind, string, error) {
+	q := strings.TrimSpace(selector)
+	if q == "" {
+		return 0, "", fmt.Errorf("empty schema selector")
+	}
+	if strings.Contains(q, "/") {
+		if !strings.HasSuffix(q, ".json") {
+			q += ".json"
+		}
+		return selectorPath, q, nil
+	}
+	return selectorName, strings.TrimSuffix(q, ".json"), nil
+}
+
 // Resolve maps a user selector onto manifest entries. A selector may be:
 //   - a repo-relative path ("jobs/job-posting.json", trailing .json optional)
 //   - a category ("jobs") -> every schema in that category
@@ -125,32 +152,27 @@ func (f *Fetcher) Fetch(ctx context.Context, schemaPath string) ([]byte, error) 
 // Bare names that match more than one schema, or that collide with a category,
 // return an ambiguity error so the user can disambiguate with a full path.
 func (idx Index) Resolve(selector string) ([]Entry, error) {
-	q := strings.TrimSpace(selector)
-	if q == "" {
-		return nil, fmt.Errorf("empty schema selector")
+	kind, val, err := parseSelector(selector)
+	if err != nil {
+		return nil, err
 	}
 
-	// A selector containing a slash is treated as an explicit path.
-	if strings.Contains(q, "/") {
-		want := q
-		if !strings.HasSuffix(want, ".json") {
-			want += ".json"
-		}
+	if kind == selectorPath {
 		for _, e := range idx.Schemas {
-			if e.Path == want {
+			if e.Path == val {
 				return []Entry{e}, nil
 			}
 		}
-		return nil, fmt.Errorf("no schema at path %q (run `tabstack schema list`)", q)
+		return nil, fmt.Errorf("no schema at path %q (run `tabstack schema list`)", val)
 	}
 
-	name := strings.TrimSuffix(q, ".json")
+	name := val
 	var byName, byCategory []Entry
 	for _, e := range idx.Schemas {
 		if base := strings.TrimSuffix(path.Base(e.Path), ".json"); base == name {
 			byName = append(byName, e)
 		}
-		if e.Category == q {
+		if e.Category == name {
 			byCategory = append(byCategory, e)
 		}
 	}
@@ -161,11 +183,11 @@ func (idx Index) Resolve(selector string) ([]Entry, error) {
 	case len(byName) == 0 && len(byCategory) > 0:
 		return byCategory, nil
 	case len(byName) > 1:
-		return nil, fmt.Errorf("%q is ambiguous, matches %s; use a full path", q, pathsOf(byName))
+		return nil, fmt.Errorf("%q is ambiguous, matches %s; use a full path", name, pathsOf(byName))
 	case len(byName) >= 1 && len(byCategory) > 0:
-		return nil, fmt.Errorf("%q matches both a schema and a category; use a full path or the category name", q)
+		return nil, fmt.Errorf("%q matches both a schema and a category; use a full path or the category name", name)
 	default:
-		return nil, fmt.Errorf("no schema named %q (run `tabstack schema list`)", q)
+		return nil, fmt.Errorf("no schema named %q (run `tabstack schema list`)", name)
 	}
 }
 

@@ -85,7 +85,10 @@ func promptChoice(prompt, keys string, def byte) (byte, error) {
 		fmt.Fprint(os.Stderr, prompt)
 		line, err := reader.ReadString('\n')
 		if err != nil && line == "" {
-			return 0, err
+			// EOF (Ctrl-D) or a read error with no input: treat as "couldn't get
+			// an interactive answer", same as a non-TTY, so the caller maps it to
+			// the exit-2 guidance path instead of a bare "EOF" at exit 1.
+			return 0, errNotTerminal
 		}
 		line = strings.TrimSpace(strings.ToLower(line))
 		if line == "" && def != 0 {

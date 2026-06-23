@@ -22,18 +22,32 @@ type Styles struct {
 	Cite     lipgloss.Style
 }
 
-// palette: the Tabstack brand colors (tabstack.ai), kept adaptive so they read
-// on both light and dark terminals. lipgloss.AdaptiveColor picks Light or Dark
-// based on the detected background. Brand accents are purple (#541bff) and pink
-// (#ff97ea); success stays green for its conventional meaning.
+// Tabstack brand palette (tabstack.ai), as raw hex. Defined once here so the
+// fang help theme (cmd/tabstack, lipgloss v2) and these output styles
+// (lipgloss v1) share a single source of truth; each consumer wraps these in
+// its own color type and picks a context-appropriate light/dark variant.
+const (
+	HexPurple      = "#541bff" // primary accent
+	HexPurpleLight = "#7c5cff" // lighter purple for dark terminals
+	HexPink        = "#ff97ea" // secondary accent (reads on dark)
+	HexPinkLight   = "#b3408f" // pink that reads on light terminals
+	HexGray        = "#7c7985" // muted text
+	HexInk         = "#10100f" // near-black body text
+	HexPaper       = "#f4f4f5" // off-white body text on dark
+	HexWhite       = "#ffffff"
+)
+
+// palette: the brand hexes above, kept adaptive so they read on both light and
+// dark terminals. lipgloss.AdaptiveColor picks Light or Dark based on the
+// detected background. Success stays green for its conventional meaning.
 var (
 	colorSuccess = lipgloss.AdaptiveColor{Light: "#1a7f37", Dark: "#3fb950"}
-	colorAgent   = lipgloss.AdaptiveColor{Light: "#541bff", Dark: "#7c5cff"} // brand purple
-	colorBrowser = lipgloss.AdaptiveColor{Light: "#b3408f", Dark: "#ff97ea"} // brand pink
-	colorMuted   = lipgloss.AdaptiveColor{Light: "#7c7985", Dark: "#7c7985"} // brand gray
+	colorAgent   = lipgloss.AdaptiveColor{Light: HexPurple, Dark: HexPurpleLight}
+	colorBrowser = lipgloss.AdaptiveColor{Light: HexPinkLight, Dark: HexPink}
+	colorMuted   = lipgloss.AdaptiveColor{Light: HexGray, Dark: HexGray}
 	colorError   = lipgloss.AdaptiveColor{Light: "#cf222e", Dark: "#f85149"}
-	colorBrand   = lipgloss.AdaptiveColor{Light: "#541bff", Dark: "#7c5cff"} // brand purple, for accents/borders
-	colorCite    = lipgloss.AdaptiveColor{Light: "#b3408f", Dark: "#ff97ea"} // brand pink for citation markers
+	colorBrand   = lipgloss.AdaptiveColor{Light: HexPurple, Dark: HexPurpleLight} // accents/borders
+	colorCite    = lipgloss.AdaptiveColor{Light: HexPinkLight, Dark: HexPink}     // citation markers
 )
 
 // NewStyles builds the active style set. When noColor is true (either via the

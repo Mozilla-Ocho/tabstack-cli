@@ -275,19 +275,41 @@ func TestComputeStatusModifiedAndOutdated(t *testing.T) {
 	}
 }
 
+func TestComputeStatusRemoteUnknown(t *testing.T) {
+	dir := t.TempDir()
+	local := `{"title":"v1"}`
+	if err := schemas.Write(dir, jpPath, []byte(local)); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := schemas.LoadManifest(dir)
+	m.Set(jpPath, schemas.CanonicalSHA([]byte(local)), "t")
+	if err := m.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetcher serves no bodies, so the remote check 404s. A failed check must
+	// read as "remote unknown", not be silently swallowed into "up to date".
+	f := serveBodies(t, nil)
+	if got := statusMap(t, dir, f)[jpPath]; got != "remote unknown" {
+		t.Errorf("status = %q, want \"remote unknown\"", got)
+	}
+}
+
 func TestStatusLabel(t *testing.T) {
 	cases := []struct {
-		mod, out bool
-		want     string
+		mod, out, unknown bool
+		want              string
 	}{
-		{false, false, "up to date"},
-		{true, false, "modified"},
-		{false, true, "outdated"},
-		{true, true, "modified, outdated"},
+		{false, false, false, "up to date"},
+		{true, false, false, "modified"},
+		{false, true, false, "outdated"},
+		{true, true, false, "modified, outdated"},
+		{false, false, true, "remote unknown"},
+		{true, false, true, "modified, remote unknown"},
 	}
 	for _, c := range cases {
-		if got := statusLabel(c.mod, c.out); got != c.want {
-			t.Errorf("statusLabel(%v,%v) = %q, want %q", c.mod, c.out, got, c.want)
+		if got := statusLabel(c.mod, c.out, c.unknown); got != c.want {
+			t.Errorf("statusLabel(%v,%v,%v) = %q, want %q", c.mod, c.out, c.unknown, got, c.want)
 		}
 	}
 }

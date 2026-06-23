@@ -48,15 +48,35 @@ func ListLocal(dir string) ([]string, error) {
 
 // LocalPath joins a storage directory with a repo-relative schema path. The
 // repo layout (category/name.json) is mirrored on disk so a pulled schema keeps
-// a stable identity for later comparison.
+// a stable identity for later comparison. It does not guard against traversal;
+// callers that touch the filesystem with caller- or remote-supplied paths use
+// SafePath instead.
 func LocalPath(dir, schemaPath string) string {
 	return filepath.Join(dir, filepath.FromSlash(schemaPath))
+}
+
+// SafePath is LocalPath plus a containment check: it rejects any schema path
+// that, once joined and cleaned, would escape dir (absolute paths, or ".."
+// traversal). Both user selectors and remote index.json entries flow through
+// here before any read/write, so a hostile manifest cannot read or clobber
+// files outside the store.
+func SafePath(dir, schemaPath string) (string, error) {
+	p := filepath.Clean(LocalPath(dir, schemaPath))
+	root := filepath.Clean(dir)
+	if p != root && !strings.HasPrefix(p, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("schema path %q escapes the store directory", schemaPath)
+	}
+	return p, nil
 }
 
 // Read returns the bytes of a locally stored schema. The bool reports whether
 // the file exists; a missing file is not an error.
 func Read(dir, schemaPath string) ([]byte, bool, error) {
-	data, err := os.ReadFile(LocalPath(dir, schemaPath))
+	p, err := SafePath(dir, schemaPath)
+	if err != nil {
+		return nil, false, err
+	}
+	data, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
 	}
@@ -70,7 +90,10 @@ func Read(dir, schemaPath string) ([]byte, bool, error) {
 // Schemas are not secrets, so we use ordinary 0644/0755 permissions (unlike the
 // 0600 config file).
 func Write(dir, schemaPath string, data []byte) error {
-	p := LocalPath(dir, schemaPath)
+	p, err := SafePath(dir, schemaPath)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -83,36 +106,35 @@ func Write(dir, schemaPath string, data []byte) error {
 // repo-relative path (trailing .json optional) or a bare schema name; a bare
 // name that matches more than one stored file returns an ambiguity error.
 func FindLocal(dir, selector string) (string, error) {
-	q := strings.TrimSpace(selector)
-	if q == "" {
-		return "", fmt.Errorf("empty schema name")
+	kind, val, err := parseSelector(selector)
+	if err != nil {
+		return "", err
 	}
 
-	if strings.Contains(q, "/") {
-		rel := q
-		if !strings.HasSuffix(rel, ".json") {
-			rel += ".json"
+	if kind == selectorPath {
+		p, err := SafePath(dir, val)
+		if err != nil {
+			return "", err
 		}
-		if _, err := os.Stat(LocalPath(dir, rel)); err != nil {
+		if _, err := os.Stat(p); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return "", fmt.Errorf("no stored schema at %q; pull it with `tabstack schema pull %s`", rel, q)
+				return "", fmt.Errorf("no stored schema at %q; pull it with `tabstack schema pull %s`", val, val)
 			}
 			return "", err
 		}
-		return rel, nil
+		return val, nil
 	}
 
-	name := strings.TrimSuffix(q, ".json")
 	locals, err := ListLocal(dir)
 	if err != nil {
 		return "", err
 	}
 	if len(locals) == 0 {
-		return "", fmt.Errorf("no schemas stored yet; pull one with `tabstack schema pull %s`", q)
+		return "", fmt.Errorf("no schemas stored yet; pull one with `tabstack schema pull %s`", val)
 	}
 	var matches []string
 	for _, rel := range locals {
-		if strings.TrimSuffix(path.Base(rel), ".json") == name {
+		if strings.TrimSuffix(path.Base(rel), ".json") == val {
 			matches = append(matches, rel)
 		}
 	}
@@ -121,10 +143,10 @@ func FindLocal(dir, selector string) (string, error) {
 	case 1:
 		return matches[0], nil
 	case 0:
-		return "", fmt.Errorf("no stored schema named %q; pull it with `tabstack schema pull %s`", q, q)
+		return "", fmt.Errorf("no stored schema named %q; pull it with `tabstack schema pull %s`", val, val)
 	default:
 		sort.Strings(matches)
-		return "", fmt.Errorf("%q is ambiguous, matches %s; use a full path", q, strings.Join(matches, ", "))
+		return "", fmt.Errorf("%q is ambiguous, matches %s; use a full path", val, strings.Join(matches, ", "))
 	}
 }
 

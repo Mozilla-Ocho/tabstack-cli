@@ -31,6 +31,32 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPathTraversalRejected(t *testing.T) {
+	dir := t.TempDir()
+	escapes := []string{"../escape.json", "a/../../escape.json", "../../escape.json"}
+
+	for _, p := range escapes {
+		if _, err := SafePath(dir, p); err == nil {
+			t.Errorf("SafePath(%q) = nil error, want rejection", p)
+		}
+		if err := Write(dir, p, []byte(`{}`)); err == nil {
+			t.Errorf("Write(%q) = nil error, want rejection", p)
+		}
+		if _, _, err := Read(dir, p); err == nil {
+			t.Errorf("Read(%q) = nil error, want rejection", p)
+		}
+		// Nothing escaped the store.
+		if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.json")); err == nil {
+			t.Fatalf("file escaped store via %q", p)
+		}
+	}
+
+	// A legitimate nested path is still accepted.
+	if _, err := SafePath(dir, "jobs/job-posting.json"); err != nil {
+		t.Errorf("SafePath rejected a valid path: %v", err)
+	}
+}
+
 func TestWriteParentIsFile(t *testing.T) {
 	dir := t.TempDir()
 	// Create a regular file where a category directory is expected; MkdirAll

@@ -13,19 +13,22 @@ import (
 	"github.com/charmbracelet/fang"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/cmd"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
-// Tabstack brand palette, sourced from tabstack.ai.
+// Tabstack brand palette. The shared hexes come from internal/ui so the fang
+// theme here and the output styles there cannot drift; the few values specific
+// to the help theme stay local.
 var (
-	brandPurple      = lipgloss.Color("#541bff") // primary accent
-	brandPurpleLight = lipgloss.Color("#7c5cff") // lighter purple for dark terminals
-	brandPink        = lipgloss.Color("#ff97ea") // secondary accent
-	brandPinkDeep    = lipgloss.Color("#e688d3") // pink that reads on light terminals
-	brandInk         = lipgloss.Color("#10100f") // near-black body text
-	brandPaper       = lipgloss.Color("#f4f4f5") // off-white body text on dark
-	brandGray        = lipgloss.Color("#7c7985") // muted text
-	brandRed         = lipgloss.Color("#d61f69") // error (rose, bridges the pink family)
-	brandWhite       = lipgloss.Color("#ffffff")
+	brandPurple      = lipgloss.Color(ui.HexPurple)
+	brandPurpleLight = lipgloss.Color(ui.HexPurpleLight)
+	brandPink        = lipgloss.Color(ui.HexPink)
+	brandPinkDeep    = lipgloss.Color("#e688d3") // pink that reads on light terminals (help theme only)
+	brandInk         = lipgloss.Color(ui.HexInk)
+	brandPaper       = lipgloss.Color(ui.HexPaper)
+	brandGray        = lipgloss.Color(ui.HexGray)
+	brandRed         = lipgloss.Color("#d61f69") // error rose, bridges the pink family (help theme only)
+	brandWhite       = lipgloss.Color(ui.HexWhite)
 )
 
 // brandScheme themes fang's help, usage, and error output with the Tabstack
