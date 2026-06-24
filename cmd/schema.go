@@ -19,6 +19,11 @@ import (
 // before we refetch. `--refresh` forces a fetch regardless.
 const indexCacheTTL = time.Hour
 
+// completionTimeout bounds the index fetch behind <TAB> completion. Completion
+// must feel instant, so it gets a far tighter deadline than the fetcher's own
+// default: a slow network falls back to no completions rather than a hung shell.
+const completionTimeout = 2 * time.Second
+
 // newSchemaCmd is the parent grouping for the schema library commands. These do
 // not talk to the authenticated API (they pull public files from GitHub), so
 // the subcommands carry the skipClient annotation and run with a renderer only.
@@ -210,7 +215,7 @@ func newSchemaRmCmd() *cobra.Command {
 		Annotations:       map[string]string{"skipClient": "true"},
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeLocalSchemaNames,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			dir, err := schemaStoreDir(storage)
 			if err != nil {
 				return withCode(1, err)
@@ -220,6 +225,15 @@ func newSchemaRmCmd() *cobra.Command {
 			if err != nil {
 				return withCode(1, err)
 			}
+			// Persist the manifest on every exit path so a mid-loop os.Remove
+			// failure cannot leave already-deleted files tracked (they would
+			// otherwise read as 'missing' forever). The save error only surfaces
+			// if nothing else already failed.
+			defer func() {
+				if saveErr := m.Save(dir); saveErr != nil && err == nil {
+					err = withCode(1, saveErr)
+				}
+			}()
 
 			r := rootApp.renderer
 			removed := 0
@@ -236,9 +250,6 @@ func newSchemaRmCmd() *cobra.Command {
 				fmt.Fprintf(r.Out, "%s removed %s\n", r.Styles.Success.Render("✓"), rel)
 			}
 
-			if err := m.Save(dir); err != nil {
-				return withCode(1, err)
-			}
 			fmt.Fprintf(r.Out, "\n%d removed\n", removed)
 			return nil
 		},
@@ -407,26 +418,49 @@ func computeStatus(ctx context.Context, dir string, fetcher *schemas.Fetcher) ([
 	}
 	sort.Strings(paths)
 
-	// Fetch every remote schema concurrently rather than in N serial round
-	// trips. A per-path error is kept (not discarded) so a failed check reads as
-	// "remote unknown" instead of silently passing for "up to date".
-	remotes := fetchRemotes(ctx, fetcher, paths)
-
-	rows := make([]statusRow, 0, len(paths))
+	// Read every local file once up front, so the remote fetch can be narrowed
+	// to only the paths whose remote bytes are actually compared below.
+	type localState struct {
+		data   []byte
+		exists bool
+		err    error
+	}
+	reads := make(map[string]localState, len(paths))
 	for _, p := range paths {
-		entry, tracked := m.Schemas[p]
 		data, exists, err := schemas.Read(dir, p)
 		if err != nil {
 			return nil, withCode(1, err)
 		}
+		reads[p] = localState{data: data, exists: exists}
+	}
+
+	// Only tracked, on-disk schemas reach the remote-comparison branch. Fetching
+	// untracked (user-dropped) or missing paths would be a guaranteed 404 whose
+	// result is discarded, so leave them out of the fan-out entirely.
+	var fetchPaths []string
+	for _, p := range paths {
+		if _, tracked := m.Schemas[p]; tracked && reads[p].exists {
+			fetchPaths = append(fetchPaths, p)
+		}
+	}
+
+	// Fetch the remaining remotes concurrently rather than in N serial round
+	// trips. A per-path error is kept (not discarded) so a failed check reads as
+	// "remote unknown" instead of silently passing for "up to date".
+	remotes := fetchRemotes(ctx, fetcher, fetchPaths)
+
+	rows := make([]statusRow, 0, len(paths))
+	for _, p := range paths {
+		entry, tracked := m.Schemas[p]
+		ls := reads[p]
 
 		switch {
-		case !exists:
+		case !ls.exists:
 			rows = append(rows, statusRow{p, "missing"})
 		case !tracked:
 			rows = append(rows, statusRow{p, "untracked"})
 		default:
-			modified := schemas.CanonicalSHA(data) != entry.SHA256
+			modified := schemas.CanonicalSHA(ls.data) != entry.SHA256
 			outdated, remoteUnknown := false, false
 			if fetcher != nil {
 				switch rr := remotes[p]; {
@@ -449,21 +483,30 @@ type remoteResult struct {
 	err  error
 }
 
+// maxRemoteFetches bounds how many schema fetches run at once. A large or
+// custom-heavy store would otherwise burst one connection per path at GitHub
+// and risk rate-limiting (surfacing as spurious "remote unknown").
+const maxRemoteFetches = 8
+
 // fetchRemotes fetches every path from the remote concurrently and returns the
 // results keyed by path. A nil fetcher (local-only mode) returns an empty map.
+// Concurrency is capped at maxRemoteFetches via a semaphore.
 func fetchRemotes(ctx context.Context, fetcher *schemas.Fetcher, paths []string) map[string]remoteResult {
 	out := make(map[string]remoteResult, len(paths))
 	if fetcher == nil {
 		return out
 	}
 	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, maxRemoteFetches)
 	)
 	for _, p := range paths {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			data, err := fetcher.Fetch(ctx, p)
 			mu.Lock()
 			out[p] = remoteResult{data: data, err: err}
@@ -606,7 +649,9 @@ func completePullSelectors(cmd *cobra.Command, _ []string, _ string) ([]string, 
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	idx, err := schemas.CachedIndex(context.Background(), schemas.NewFetcher(), dir, indexCacheTTL, false)
+	ctx, cancel := context.WithTimeout(context.Background(), completionTimeout)
+	defer cancel()
+	idx, err := schemas.CachedIndex(ctx, schemas.NewFetcher(), dir, indexCacheTTL, false)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

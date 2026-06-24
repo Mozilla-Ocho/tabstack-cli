@@ -15,11 +15,19 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 )
 
 // DefaultRawBase is the raw.githubusercontent.com root for the schema repo's
 // main branch. Every schema and the index hang off this.
 const DefaultRawBase = "https://raw.githubusercontent.com/Mozilla-Ocho/tabstack-schemas/main"
+
+// defaultTimeout bounds each schema fetch. Unlike the SSE streams in
+// internal/client (which deliberately run untimed), these are finite GETs, so a
+// stalled connection to raw.githubusercontent.com must not hang the command —
+// or, worse, <TAB> completion — forever. Callers that need a tighter bound
+// (e.g. shell completion) still layer a shorter context deadline on top.
+const defaultTimeout = 30 * time.Second
 
 // Entry is one schema's manifest record from index.json.
 type Entry struct {
@@ -72,7 +80,7 @@ func WithRawBase(base string) Option {
 // NewFetcher constructs a Fetcher pointed at the public schema repo.
 func NewFetcher(opts ...Option) *Fetcher {
 	f := &Fetcher{
-		http:    &http.Client{},
+		http:    &http.Client{Timeout: defaultTimeout},
 		rawBase: DefaultRawBase,
 	}
 	for _, opt := range opts {

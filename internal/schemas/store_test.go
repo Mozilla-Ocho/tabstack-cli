@@ -57,6 +57,44 @@ func TestPathTraversalRejected(t *testing.T) {
 	}
 }
 
+func TestSymlinkEscapeRejected(t *testing.T) {
+	store := t.TempDir()
+	outside := t.TempDir()
+
+	// A symlinked subdir inside the store points outside it. jobs/x.json is
+	// lexically contained but would write into `outside` if followed.
+	if err := os.Symlink(outside, filepath.Join(store, "jobs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if _, err := SafePath(store, "jobs/x.json"); err == nil {
+		t.Error("SafePath followed a symlink out of the store, want rejection")
+	}
+	if err := Write(store, "jobs/x.json", []byte(`{}`)); err == nil {
+		t.Error("Write followed a symlink out of the store, want rejection")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "x.json")); err == nil {
+		t.Fatal("file escaped the store via a symlink")
+	}
+}
+
+func TestSymlinkedStoreRootAccepted(t *testing.T) {
+	// The store root itself being a symlink (e.g. macOS /tmp -> /private/tmp)
+	// must not trip the containment check.
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "store-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if _, err := SafePath(link, "jobs/job-posting.json"); err != nil {
+		t.Errorf("SafePath rejected a valid path under a symlinked store root: %v", err)
+	}
+	if err := Write(link, "jobs/job-posting.json", []byte(`{}`)); err != nil {
+		t.Errorf("Write rejected a valid path under a symlinked store root: %v", err)
+	}
+}
+
 func TestWriteParentIsFile(t *testing.T) {
 	dir := t.TempDir()
 	// Create a regular file where a category directory is expected; MkdirAll
@@ -200,6 +238,10 @@ func TestEqual(t *testing.T) {
 		{"different", `{"a":1}`, `{"a":2}`, false},
 		{"non-json falls back to bytes", "not json", "not json", true},
 		{"non-json differs", "not json", "other", false},
+		// Large integers above 2^53 must not collapse to the same float64 and
+		// read as equal (see canonical's UseNumber).
+		{"large int drift", `{"max":9007199254740993}`, `{"max":9007199254740992}`, false},
+		{"large int identical", `{"max":9007199254740993}`, "{\n  \"max\": 9007199254740993\n}", true},
 	}
 	for _, tc := range cases {
 		if got := Equal([]byte(tc.a), []byte(tc.b)); got != tc.want {

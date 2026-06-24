@@ -56,17 +56,66 @@ func LocalPath(dir, schemaPath string) string {
 }
 
 // SafePath is LocalPath plus a containment check: it rejects any schema path
-// that, once joined and cleaned, would escape dir (absolute paths, or ".."
-// traversal). Both user selectors and remote index.json entries flow through
-// here before any read/write, so a hostile manifest cannot read or clobber
-// files outside the store.
+// that would escape dir. Both user selectors and remote index.json entries flow
+// through here before any read/write, so a hostile manifest cannot read or
+// clobber files outside the store.
+//
+// Two layers: a lexical check rejects absolute paths and ".." traversal, then a
+// symlink-resolved check rejects paths that escape via a symlinked component
+// inside the store (e.g. <store>/jobs -> /etc, where jobs/x.json is lexically
+// contained but writes to /etc/x.json). The returned path is the original
+// lexical join (not the resolved one) so the on-disk layout stays stable.
 func SafePath(dir, schemaPath string) (string, error) {
 	p := filepath.Clean(LocalPath(dir, schemaPath))
 	root := filepath.Clean(dir)
 	if p != root && !strings.HasPrefix(p, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("schema path %q escapes the store directory", schemaPath)
 	}
+
+	realRoot, err := resolveExisting(root)
+	if err != nil {
+		return "", err
+	}
+	realP, err := resolveExisting(p)
+	if err != nil {
+		return "", err
+	}
+	if realP != realRoot && !strings.HasPrefix(realP, realRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("schema path %q escapes the store directory via a symlink", schemaPath)
+	}
 	return p, nil
+}
+
+// resolveExisting returns p with symlinks resolved. Because p (a schema file or
+// the store root) may not exist yet, it resolves the deepest existing ancestor
+// with filepath.EvalSymlinks and re-appends the not-yet-created tail. The tail
+// is guaranteed symlink-free (it does not exist) and ".."-free (callers pass a
+// lexically cleaned, contained path), so joining it back cannot re-introduce an
+// escape.
+func resolveExisting(p string) (string, error) {
+	p = filepath.Clean(p)
+	cur := p
+	var tail []string
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			real, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", err
+			}
+			for i := len(tail) - 1; i >= 0; i-- {
+				real = filepath.Join(real, tail[i])
+			}
+			return real, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p, nil // reached the volume root; nothing along p exists
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
 }
 
 // Read returns the bytes of a locally stored schema. The bool reports whether
@@ -165,9 +214,16 @@ func Equal(a, b []byte) bool {
 
 // canonical normalises a JSON document: json.Marshal emits map keys in sorted
 // order, so re-marshalling a decoded value yields a stable canonical form.
+//
+// UseNumber keeps numeric literals as json.Number rather than float64, so large
+// integers (e.g. a schema's maximum/multipleOf above 2^53) round-trip exactly.
+// Without it, 9007234567890993 and ...992 would both collapse to the same
+// float64 and canonicalise identically, masking real upstream drift.
 func canonical(data []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
 	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
 	return json.Marshal(v)

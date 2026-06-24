@@ -35,6 +35,8 @@ const (
 	HexInk         = "#10100f" // near-black body text
 	HexPaper       = "#f4f4f5" // off-white body text on dark
 	HexWhite       = "#ffffff"
+	HexPinkDeep    = "#e688d3" // pink that reads on light terminals (fang help theme only)
+	HexRose        = "#d61f69" // error rose, bridges the pink family (fang help theme only)
 )
 
 // palette: the brand hexes above, kept adaptive so they read on both light and

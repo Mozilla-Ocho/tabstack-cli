@@ -16,18 +16,18 @@ import (
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
-// Tabstack brand palette. The shared hexes come from internal/ui so the fang
-// theme here and the output styles there cannot drift; the few values specific
-// to the help theme stay local.
+// Tabstack brand palette. Every hex comes from internal/ui so the fang theme
+// here and the output styles there share one source of truth and cannot drift;
+// the help-theme-only variants live alongside the rest as ui.HexPinkDeep/HexRose.
 var (
 	brandPurple      = lipgloss.Color(ui.HexPurple)
 	brandPurpleLight = lipgloss.Color(ui.HexPurpleLight)
 	brandPink        = lipgloss.Color(ui.HexPink)
-	brandPinkDeep    = lipgloss.Color("#e688d3") // pink that reads on light terminals (help theme only)
+	brandPinkDeep    = lipgloss.Color(ui.HexPinkDeep)
 	brandInk         = lipgloss.Color(ui.HexInk)
 	brandPaper       = lipgloss.Color(ui.HexPaper)
 	brandGray        = lipgloss.Color(ui.HexGray)
-	brandRed         = lipgloss.Color("#d61f69") // error rose, bridges the pink family (help theme only)
+	brandRed         = lipgloss.Color(ui.HexRose)
 	brandWhite       = lipgloss.Color(ui.HexWhite)
 )
 

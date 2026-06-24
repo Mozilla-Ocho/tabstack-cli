@@ -3,6 +3,9 @@ module github.com/Mozilla-Ocho/tabstack-cli
 go 1.26.1
 
 require (
+	// Beta, pinned to the revision fang v1.0.0 builds against (used by the help
+	// theme in cmd/tabstack). Reproducible via go.sum; do not `go get -u` it
+	// independently of fang — a newer beta can shift the help-rendering API.
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251106193318-19329a3e8410
 	github.com/charmbracelet/fang v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
