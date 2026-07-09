@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -408,6 +410,39 @@ func TestRunPullUpToDateBackfillsManifest(t *testing.T) {
 	m, _ := schemas.LoadManifest(dir)
 	if m.Schemas[jpPath].SHA256 != schemas.CanonicalSHA([]byte(body)) {
 		t.Error("manifest not backfilled for up-to-date schema")
+	}
+}
+
+// TestRunPullRejectsTraversal drives a hostile index Entry (a path that escapes
+// the store) end-to-end through runPull. The remote-supplied path must never be
+// written outside the store: SafePath in schemas.Read/Write rejects it and
+// runPull fails rather than clobbering a file elsewhere on disk.
+func TestRunPullRejectsTraversal(t *testing.T) {
+	setTestApp(t)
+	parent := t.TempDir()
+	store := filepath.Join(parent, "store")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	hostile := "../../etc/x.json"
+	// The fetch itself succeeds (the server serves any path); the escape must be
+	// caught at the local write boundary, not by a lucky 404.
+	f := serveBodies(t, map[string]string{
+		hostile:      `{"pwned":true}`,
+		"etc/x.json": `{"pwned":true}`,
+	})
+	targets := []schemas.Entry{{Category: "jobs", Path: hostile}}
+
+	if err := runPull(context.Background(), f, store, targets, true); err == nil {
+		t.Fatal("expected runPull to reject a store-escaping path")
+	}
+
+	// The lexical target the hostile path would resolve to (outside the store)
+	// must not have been created.
+	escaped := filepath.Clean(filepath.Join(store, hostile))
+	if _, err := os.Stat(escaped); err == nil {
+		t.Fatalf("traversal wrote a file outside the store at %s", escaped)
 	}
 }
 

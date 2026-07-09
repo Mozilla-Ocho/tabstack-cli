@@ -78,7 +78,7 @@ func newExtractJSONCmd() *cobra.Command {
 		Long: "Fetch a URL and extract data shaped by a JSON schema.\n\n" +
 			"Provide the schema inline with --schema (a literal string, @file, or -\n" +
 			"for stdin), or use --schema-name to reference a schema you pulled with\n" +
-			"`tabstack schema pull` (a bare name, category path, or full repo path).",
+			"`tabstack schema pull` (a bare name or full repo path).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validEffort(effort); err != nil {

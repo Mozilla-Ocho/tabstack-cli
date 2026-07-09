@@ -29,6 +29,12 @@ const DefaultRawBase = "https://raw.githubusercontent.com/Mozilla-Ocho/tabstack-
 // (e.g. shell completion) still layer a shorter context deadline on top.
 const defaultTimeout = 30 * time.Second
 
+// maxResponseBytes caps how much we read from a single GitHub response. Schemas
+// and the index are small JSON documents; this guards against a hostile or
+// misconfigured endpoint streaming an unbounded body into memory. 8MB is far
+// above any real schema or index while still bounding the worst case.
+const maxResponseBytes = 8 << 20
+
 // Entry is one schema's manifest record from index.json.
 type Entry struct {
 	Category    string `json:"category"`
@@ -104,7 +110,14 @@ func (f *Fetcher) get(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &FetchError{URL: url, StatusCode: resp.StatusCode}
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxResponseBytes {
+		return nil, fmt.Errorf("fetch %s: response exceeds %d bytes", url, maxResponseBytes)
+	}
+	return data, nil
 }
 
 // Index fetches and decodes index.json.

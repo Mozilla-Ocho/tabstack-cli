@@ -160,6 +160,56 @@ func TestIndexFetchError(t *testing.T) {
 	}
 }
 
+// TestFetchNoAuthHeader locks in the transport-isolation invariant: the schema
+// fetcher talks to public GitHub unauthenticated and must never send an
+// Authorization (or other credential) header. Isolation is safe by construction
+// today (this package never sees the API bearer token), but a test pins it so a
+// future refactor that threads auth through here fails loudly.
+func TestFetchNoAuthHeader(t *testing.T) {
+	var gotAuth, gotCookie string
+	var sawHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawHeader = true
+		gotAuth = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
+		_, _ = w.Write([]byte(`{"title":"Job Posting"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	f := NewFetcher(WithRawBase(srv.URL), WithHTTPClient(srv.Client()))
+
+	if _, err := f.Fetch(context.Background(), "jobs/job-posting.json"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if _, err := f.Index(context.Background()); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+	if !sawHeader {
+		t.Fatal("server never received a request")
+	}
+	if gotAuth != "" {
+		t.Errorf("outbound request carried Authorization header %q, want none", gotAuth)
+	}
+	if gotCookie != "" {
+		t.Errorf("outbound request carried Cookie header %q, want none", gotCookie)
+	}
+}
+
+// TestFetchBodyLimit ensures an oversized response is rejected rather than read
+// unbounded into memory.
+func TestFetchBodyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		big := make([]byte, maxResponseBytes+1024)
+		_, _ = w.Write(big)
+	}))
+	t.Cleanup(srv.Close)
+
+	f := NewFetcher(WithRawBase(srv.URL), WithHTTPClient(srv.Client()))
+	if _, err := f.Fetch(context.Background(), "big.json"); err == nil {
+		t.Error("expected error for oversized response body")
+	}
+}
+
 func TestNewFetcherTrimsRawBase(t *testing.T) {
 	f := NewFetcher(WithRawBase("https://x/base/"))
 	if f.rawBase != "https://x/base" {

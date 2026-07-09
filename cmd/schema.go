@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/schemas"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
 // indexCacheTTL is how long a cached copy of the library index.json is trusted
@@ -23,6 +24,13 @@ const indexCacheTTL = time.Hour
 // must feel instant, so it gets a far tighter deadline than the fetcher's own
 // default: a slow network falls back to no completions rather than a hung shell.
 const completionTimeout = 2 * time.Second
+
+// statusTimeout bounds the whole `schema status` remote fan-out. Each fetch
+// already carries the fetcher's own 30s per-request timeout, but a large store
+// (many schemas, capped concurrency) could still stack up well past that. This
+// caps the total wait so the command cannot hang; timed-out fetches surface as
+// "remote unknown" rather than up to date.
+const statusTimeout = 60 * time.Second
 
 // newSchemaCmd is the parent grouping for the schema library commands. These do
 // not talk to the authenticated API (they pull public files from GitHub), so
@@ -384,6 +392,9 @@ func runStatus(ctx context.Context, dir string, local bool) error {
 	var fetcher *schemas.Fetcher
 	if !local {
 		fetcher = schemas.NewFetcher()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, statusTimeout)
+		defer cancel()
 	}
 	rows, err := computeStatus(ctx, dir, fetcher)
 	if err != nil {
@@ -423,7 +434,6 @@ func computeStatus(ctx context.Context, dir string, fetcher *schemas.Fetcher) ([
 	type localState struct {
 		data   []byte
 		exists bool
-		err    error
 	}
 	reads := make(map[string]localState, len(paths))
 	for _, p := range paths {
@@ -545,7 +555,7 @@ func printPullSummary(pulled, current, kept int) {
 // mode prints a styled "state  path" line per schema.
 func printStatus(rows []statusRow) error {
 	r := rootApp.renderer
-	if r.Mode == "json" {
+	if r.Mode == ui.ModeJSON {
 		raw, err := json.Marshal(rows)
 		if err != nil {
 			return err
@@ -576,7 +586,7 @@ func printStatus(rows []statusRow) error {
 // printLocalList renders the paths of locally pulled schemas.
 func printLocalList(pulled []string) error {
 	r := rootApp.renderer
-	if r.Mode == "json" {
+	if r.Mode == ui.ModeJSON {
 		raw, err := json.Marshal(pulled)
 		if err != nil {
 			return err
@@ -599,7 +609,7 @@ func printLocalList(pulled []string) error {
 // already pulled into the local store.
 func printSchemaList(idx schemas.Index, pulled map[string]bool) error {
 	r := rootApp.renderer
-	if r.Mode == "json" {
+	if r.Mode == ui.ModeJSON {
 		raw, err := json.Marshal(idx.Schemas)
 		if err != nil {
 			return err
