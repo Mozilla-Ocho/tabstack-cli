@@ -87,9 +87,9 @@ func Resolve(apiKeyFlag, baseURLFlag string) (Config, error) {
 	return cfg, nil
 }
 
-// ConfigPath returns the path we read from and write to. We follow the XDG
-// base directory spec, falling back to ~/.config when XDG_CONFIG_HOME is unset.
-func ConfigPath() (string, error) {
+// configHome returns the tabstack config directory. We follow the XDG base
+// directory spec, falling back to ~/.config when XDG_CONFIG_HOME is unset.
+func configHome() (string, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -98,7 +98,27 @@ func ConfigPath() (string, error) {
 		}
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "tabstack", "config.toml"), nil
+	return filepath.Join(base, "tabstack"), nil
+}
+
+// ConfigPath returns the path we read the config file from and write it to.
+func ConfigPath() (string, error) {
+	home, err := configHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "config.toml"), nil
+}
+
+// SchemasDir returns the default directory pre-defined schemas are pulled into
+// (`schema pull`). It sits alongside the config file under the tabstack config
+// home. The `--storage` flag overrides it per invocation.
+func SchemasDir() (string, error) {
+	home, err := configHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "schemas"), nil
 }
 
 // loadFile reads and parses the config file. A missing file is not an error,

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -65,29 +64,30 @@ func newExtractMarkdownCmd() *cobra.Command {
 
 func newExtractJSONCmd() *cobra.Command {
 	var (
-		schema  string
-		effort  string
-		geo     string
-		nocache bool
+		schema     string
+		schemaName string
+		storage    string
+		effort     string
+		geo        string
+		nocache    bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "json <url>",
 		Short: "Extract structured data from a URL using a JSON schema",
 		Long: "Fetch a URL and extract data shaped by a JSON schema.\n\n" +
-			"Provide the schema with --schema as a literal string, @file to read a\n" +
-			"file, or - to read from stdin.",
+			"Provide the schema inline with --schema (a literal string, @file, or -\n" +
+			"for stdin), or use --schema-name to reference a schema you pulled with\n" +
+			"`tabstack schema pull` (a bare name or full repo path).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if schema == "" {
-				return withCode(2, fmt.Errorf("required: --schema (JSON schema as literal string, @file, or -)"))
-			}
 			if err := validEffort(effort); err != nil {
 				return withCode(2, err)
 			}
-			schemaJSON, err := readJSON(schema)
+
+			schemaJSON, err := resolveSchemaArg(schema, schemaName, storage)
 			if err != nil {
-				return withCode(2, err)
+				return err
 			}
 
 			req := client.ExtractJSONRequest{
@@ -107,10 +107,13 @@ func newExtractJSONCmd() *cobra.Command {
 	}
 
 	f := cmd.Flags()
-	f.StringVar(&schema, "schema", "", "JSON schema: literal, @file, or - for stdin (required)")
+	f.StringVar(&schema, "schema", "", "JSON schema: literal, @file, or - for stdin")
+	f.StringVar(&schemaName, "schema-name", "", "name of a pulled schema to use (see `tabstack schema pull`)")
+	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd
 }

@@ -16,6 +16,10 @@ import (
 // version is overridable at build time with -ldflags "-X ...cmd.version=...".
 var version = "dev"
 
+// Version returns the build version stamped into the binary. main uses it to
+// hand the version to fang, which renders it in styled help and --version.
+func Version() string { return version }
+
 // app is the shared context every subcommand leans on. It is populated once in
 // the root command's PersistentPreRunE, so leaf commands never re-resolve
 // config or rebuild the client. This is the small bit of glue that keeps each
@@ -70,6 +74,7 @@ func NewRootCmd() *cobra.Command {
 		newAgentCmd(),
 		newExtractCmd(),
 		newGenerateCmd(),
+		newSchemaCmd(),
 		newAuthCmd(),
 	)
 

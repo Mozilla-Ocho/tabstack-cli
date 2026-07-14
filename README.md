@@ -112,6 +112,11 @@ The base URL can likewise be set with `--base-url` or `TABSTACK_BASE_URL`.
 | `tabstack agent automate <task> [--url …]` | Run a natural-language browser-automation task (streams) |
 | `tabstack agent research <query>` | Research the web and print a cited report (streams) |
 | `tabstack agent input <request-id> --data …` | Answer a paused `--interactive` automation |
+| `tabstack schema list` | List the pre-defined extraction schemas in the library |
+| `tabstack schema pull <selector…>` | Pull schemas into a local store for use with `extract`/`generate` |
+| `tabstack schema status` | Show which pulled schemas are locally modified or out of date |
+| `tabstack schema path <name>` | Print the local file path of a pulled schema |
+| `tabstack schema rm <selector…>` | Remove pulled schemas from the local store |
 | `tabstack auth login` / `status` | Manage your API credentials |
 
 Run `tabstack <command> --help` for the full flag list on any command.
@@ -125,6 +130,9 @@ tabstack extract markdown https://example.com --metadata
 # Extract structured data shaped by a JSON schema
 tabstack extract json https://example.com --schema @schema.json
 tabstack extract json https://example.com --schema '{"type":"object","properties":{"title":{"type":"string"}}}'
+
+# …or reference a schema you pulled with `tabstack schema pull` by name
+tabstack extract json https://example.com --schema-name job-posting
 ```
 
 ### Generate
@@ -134,6 +142,11 @@ tabstack extract json https://example.com --schema '{"type":"object","properties
 tabstack generate json https://example.com \
   --instructions "Summarise the article and list the key points." \
   --schema @schema.json
+
+# …or use a pulled schema by name (same --schema-name sugar as extract)
+tabstack generate json https://example.com \
+  --instructions "Summarise the article and list the key points." \
+  --schema-name news-article
 ```
 
 ### Agent
@@ -156,6 +169,67 @@ tabstack agent input <request-id> --data '{"cancelled":true}'
 
 `agent input` only applies to runs started with `--interactive`. Without that
 flag an automation never pauses for input.
+
+### Schema
+
+Pull ready-made extraction schemas from the
+[tabstack-schemas](https://github.com/Mozilla-Ocho/tabstack-schemas) library,
+then feed them to `extract json`. Pulled schemas land in
+`$XDG_CONFIG_HOME/tabstack/schemas` (or `~/.config/tabstack/schemas`) by default,
+mirroring the repo's `category/name.json` layout.
+
+```bash
+# Browse what's available (pulled schemas are marked with a ✓)
+tabstack schema list
+tabstack schema list --local                   # only what you've pulled (offline)
+
+# Pull by name, by category, or by full path
+tabstack schema pull job-posting
+tabstack schema pull jobs                      # every schema in the "jobs" category
+tabstack schema pull jobs/job-posting.json
+tabstack schema pull --all                     # the whole library
+
+# Use a pulled schema by name (no need to spell out the path)
+tabstack schema pull product-listing
+tabstack extract json https://example.com --schema-name product-listing
+
+# …or keep a separate store and point both commands at it
+tabstack schema pull product-listing --storage ./schemas
+tabstack extract json https://example.com --schema-name product-listing --storage ./schemas
+```
+
+`--schema-name` resolves locally against the store (it never hits the network),
+so it works offline once a schema is pulled. A name that matches more than one
+stored schema is rejected — pass the full `category/name.json` path to
+disambiguate.
+
+Pull records what it fetched, so you can see how your local copies relate to the
+library and tidy up:
+
+```bash
+# What have I changed, and what's drifted upstream?
+tabstack schema status            # "modified" = your edits, "outdated" = upstream changed
+tabstack schema status --local    # skip the network; only flag local edits
+
+# Print a path (handy for scripting or other tools)
+tabstack extract json https://example.com --schema @"$(tabstack schema path job-posting)"
+
+# Remove pulled schemas you no longer need
+tabstack schema rm job-posting
+```
+
+Re-running `schema pull` on an `outdated` schema fetches the latest version
+(prompting before it overwrites local edits). The library index is cached per
+store for an hour; pass `--refresh` to `list`/`pull` to refetch immediately.
+Shell completion suggests schema names for `pull`, `rm`, `path`, and
+`--schema-name`.
+
+A selector is a schema name, a category, or a full repo path. When a pulled
+schema already exists locally and differs from the library, you're prompted to
+**overwrite**, **keep** your local copy, or **quit** — so customising a schema
+and re-pulling later never silently discards your edits. Use `--force` to
+overwrite without prompting. In a non-interactive shell a conflict fails (exit 2)
+unless `--force` is given.
 
 ## Common options
 
