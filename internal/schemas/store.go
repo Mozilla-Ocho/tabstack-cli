@@ -229,7 +229,7 @@ func canonical(data []byte) ([]byte, error) {
 	}
 	// Reject trailing bytes after the first JSON value. json.Decoder.Decode stops
 	// at the end of the first value and ignores whatever follows, so `{...}junk`
-	// would otherwise canonicalise to just the leading object — and `schema
+	// would otherwise canonicalise to just the leading object, and `schema
 	// status` would report a locally-edited file as up to date.
 	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("unexpected trailing data after JSON value")

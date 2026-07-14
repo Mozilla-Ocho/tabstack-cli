@@ -200,7 +200,7 @@ tabstack extract json https://example.com --schema-name product-listing --storag
 
 `--schema-name` resolves locally against the store (it never hits the network),
 so it works offline once a schema is pulled. A name that matches more than one
-stored schema is rejected — pass the full `category/name.json` path to
+stored schema is rejected; pass the full `category/name.json` path to
 disambiguate.
 
 Pull records what it fetched, so you can see how your local copies relate to the
@@ -226,7 +226,7 @@ Shell completion suggests schema names for `pull`, `rm`, `path`, and
 
 A selector is a schema name, a category, or a full repo path. When a pulled
 schema already exists locally and differs from the library, you're prompted to
-**overwrite**, **keep** your local copy, or **quit** — so customising a schema
+**overwrite**, **keep** your local copy, or **quit**, so customising a schema
 and re-pulling later never silently discards your edits. Use `--force` to
 overwrite without prompting. In a non-interactive shell a conflict fails (exit 2)
 unless `--force` is given.

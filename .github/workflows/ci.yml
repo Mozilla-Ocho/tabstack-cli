@@ -28,6 +28,9 @@ jobs:
             exit 1
           fi
 
+      - name: Lint copy (em dashes, banned terms)
+        run: ./scripts/lint-copy.sh
+
       - name: Vet
         run: go vet ./...
 

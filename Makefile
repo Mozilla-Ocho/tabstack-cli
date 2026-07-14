@@ -5,7 +5,7 @@ LDFLAGS := -ldflags "-s -w -X $(PKG)/cmd.version=$(VERSION)"
 
 GOBIN   := $(shell go env GOPATH)/bin
 
-.PHONY: all build install run fmt vet tidy test lint clean smoke snapshot
+.PHONY: all build install run fmt vet tidy test lint lint-copy clean smoke snapshot
 
 all: build
 
@@ -39,7 +39,10 @@ test: ## Run tests
 smoke: build ## Run live API smoke test (needs an API key; SKIP_AGENT=1 to skip costly calls)
 	./scripts/smoke-test.sh
 
-lint: fmt vet ## Format then vet
+lint-copy: ## Check docs/Go copy for em dashes and banned terms
+	./scripts/lint-copy.sh
+
+lint: fmt vet lint-copy ## Format, vet, then check copy
 
 snapshot: ## Build a local release snapshot with goreleaser (no publish)
 	goreleaser release --snapshot --clean

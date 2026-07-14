@@ -24,8 +24,8 @@ const DefaultRawBase = "https://raw.githubusercontent.com/Mozilla-Ocho/tabstack-
 
 // defaultTimeout bounds each schema fetch. Unlike the SSE streams in
 // internal/client (which deliberately run untimed), these are finite GETs, so a
-// stalled connection to raw.githubusercontent.com must not hang the command —
-// or, worse, <TAB> completion — forever. Callers that need a tighter bound
+// stalled connection to raw.githubusercontent.com must not hang the command
+// (or, worse, <TAB> completion) forever. Callers that need a tighter bound
 // (e.g. shell completion) still layer a shorter context deadline on top.
 const defaultTimeout = 30 * time.Second
 
