@@ -20,7 +20,9 @@
 #
 # To intentionally allow one of these on a specific line, append the marker
 #   lint-copy: allow
-# in a trailing comment on that line.
+# inside a trailing comment on that line: "//" for Go, "<!-- ... -->" for
+# Markdown. The marker only counts inside a comment leader, so prose that merely
+# mentions the marker cannot silently exempt itself.
 
 set -euo pipefail
 
@@ -28,8 +30,10 @@ cd "$(dirname "$0")/.."
 
 fail=0
 
-# strip_allowed drops lines carrying the "lint-copy: allow" escape hatch.
-strip_allowed() { grep -v 'lint-copy: allow' || true; }
+# strip_allowed drops lines carrying the "lint-copy: allow" escape hatch, but
+# only when the marker sits inside a comment leader ("//" or "<!--"), so a prose
+# line that merely names the marker is still linted.
+strip_allowed() { grep -vE '(//|<!--).*lint-copy: allow' || true; }
 
 # scan PATTERN DESCRIPTION FILE... — grep FILEs for PATTERN, print DESCRIPTION and
 # the hits (minus allowed lines), and flag failure. No-ops when no files match.
