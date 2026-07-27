@@ -285,12 +285,16 @@ func newCallbackHandler(expectedState, authURL string, results chan<- callbackRe
 			return
 		}
 
-		// On success, send the browser on to the console rather than leaving it
-		// parked on the loopback page. A meta refresh (not a 302) keeps a 200 with
-		// a visible fallback link and does not depend on JavaScript; the redirect
-		// target is the configured auth host, never anything from the callback
-		// query, so no code or state leaks onward.
-		fmt.Fprint(w, successPage(authURL))
+		// On success, send the browser on to the console's connected page rather
+		// than leaving it parked on the loopback page. A meta refresh (not a 302)
+		// keeps a 200 with a visible fallback link and does not depend on
+		// JavaScript; the redirect target is built from the configured auth host,
+		// never anything from the callback query, so no code or state leaks onward.
+		connected := ""
+		if authURL != "" {
+			connected = strings.TrimRight(authURL, "/") + "/oauth/connected"
+		}
+		fmt.Fprint(w, successPage(connected))
 		flush(w)
 		deliver(callbackResult{code: code})
 	})

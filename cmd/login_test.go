@@ -169,8 +169,8 @@ func TestCallbackSuccessRedirectsToConsole(t *testing.T) {
 	defer resp.Body.Close()
 	body := readAll(t, resp)
 
-	if !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, authURL) {
-		t.Errorf("success page does not redirect to the console:\n%s", body)
+	if !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, authURL+"/oauth/connected") {
+		t.Errorf("success page does not redirect to the console connected page:\n%s", body)
 	}
 	// The redirect must not carry the code or state onward.
 	for _, secret := range []string{"CODEtokenYYY", state} {
