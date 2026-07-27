@@ -95,22 +95,36 @@ func Login(ctx context.Context, authURL string, scopes string, orgID string, ope
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
-			if errCode := q.Get("error"); errCode != "" {
+			// Send on the channel only after the response is on the wire. Signalling
+			// first lets Login return and shut the server down mid-write, which the
+			// browser sees as a reset page.
+			var outcome callback
+			switch {
+			case q.Get("error") != "":
 				writeBrowserPage(w, "Authorization failed", "You can close this window and try again.")
-				results <- callback{err: fmt.Errorf("authorization failed: %s", describeOAuthError(errCode))}
-				return
-			}
-			if got := q.Get("state"); got != state {
+				outcome = callback{err: fmt.Errorf("authorization failed: %s", describeOAuthError(q.Get("error")))}
+			case q.Get("state") != state:
 				writeBrowserPage(w, "Authorization failed", "The request could not be verified.")
-				results <- callback{err: errors.New("state mismatch: the callback did not come from the sign-in you started")}
-				return
+				outcome = callback{err: errors.New("state mismatch: the callback did not come from the sign-in you started")}
+			default:
+				// Hand the browser back to the console so the user lands on the
+				// dashboard with confirmation instead of a page served from here.
+				http.Redirect(w, r, authURL+"/oauth/connected", http.StatusFound)
+				outcome = callback{code: q.Get("code"), iss: q.Get("iss")}
 			}
-			writeBrowserPage(w, "Signed in", "You can close this window and return to your terminal.")
-			results <- callback{code: q.Get("code"), iss: q.Get("iss")}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			results <- outcome
 		}),
 	}
 	go server.Serve(listener)
-	defer server.Close()
+	// Shutdown (not Close) waits for the callback response to finish sending.
+	defer func() {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelShutdown()
+		_ = server.Shutdown(shutdownCtx)
+	}()
 
 	fmt.Println("Opening your browser to authorize the Tabstack CLI.")
 	fmt.Printf("If it does not open, visit:\n\n  %s\n\n", consentURL)
