@@ -73,8 +73,10 @@ func TestAuthStatusNoKey(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "No API key") {
-		t.Errorf("output = %q", buf.String())
+	// With neither a key nor a session, status points the user at login.
+	out := buf.String()
+	if !strings.Contains(out, "no API key configured") || !strings.Contains(out, "auth login") {
+		t.Errorf("output = %q", out)
 	}
 }
 

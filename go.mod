@@ -14,6 +14,8 @@ require (
 	golang.org/x/term v0.43.0
 )
 
+require golang.org/x/oauth2 v0.36.0
+
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect

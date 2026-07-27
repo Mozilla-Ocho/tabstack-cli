@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Source describes where a resolved API key came from. Useful for `auth status`
@@ -24,9 +25,14 @@ const (
 const (
 	envAPIKey  = "TABSTACK_API_KEY"
 	envBaseURL = "TABSTACK_BASE_URL"
+	envAuthURL = "TABSTACK_AUTH_URL"
 
 	// DefaultBaseURL is the production API root. Every endpoint hangs off this.
 	DefaultBaseURL = "https://api.tabstack.ai/v1"
+
+	// DefaultAuthURL is the console: the OAuth authorization server plus the
+	// /cli/* management API. Distinct from the product API in DefaultBaseURL.
+	DefaultAuthURL = "https://console.tabstack.ai"
 )
 
 // Config is the resolved runtime configuration for a single CLI invocation.
@@ -34,27 +40,52 @@ type Config struct {
 	APIKey    string
 	KeySource Source
 	BaseURL   string
+	AuthURL   string
+
+	// Session (OAuth) state. The session authenticates the console management
+	// API; it is never sent to the product API.
+	SessionToken  string
+	RefreshToken  string
+	SessionExpiry time.Time
+
+	// APIKeyID identifies the stored product key server-side so `auth status`
+	// can tell whether it still exists. DefaultOrg is the org chosen at consent.
+	APIKeyID   string
+	DefaultOrg string
 }
 
-// fileConfig is the on-disk shape. We keep it tiny and TOML-ish, but to avoid
-// pulling in a TOML dependency for two fields we hand-parse a trivial
-// `key = "value"` format. If this grows, swap in a real parser.
-type fileConfig struct {
-	APIKey  string
-	BaseURL string
+// File is the on-disk shape. We keep it tiny and TOML-ish, but to avoid pulling
+// in a TOML dependency we hand-parse a trivial `key = "value"` format. If this
+// grows, swap in a real parser.
+type File struct {
+	APIKey        string
+	BaseURL       string
+	AuthURL       string
+	SessionToken  string
+	RefreshToken  string
+	SessionExpiry time.Time
+	APIKeyID      string
+	DefaultOrg    string
 }
 
 // Resolve builds the effective config from the three sources in priority
 // order: explicit flag, then environment, then the config file. baseURLFlag
 // and apiKeyFlag are the raw values from cobra (empty string means "not set").
 func Resolve(apiKeyFlag, baseURLFlag string) (Config, error) {
+	return ResolveWithAuth(apiKeyFlag, baseURLFlag, "")
+}
+
+// ResolveWithAuth is Resolve plus the console auth URL, which follows the same
+// flag > env > file > default precedence.
+func ResolveWithAuth(apiKeyFlag, baseURLFlag, authURLFlag string) (Config, error) {
 	cfg := Config{
 		BaseURL:   DefaultBaseURL,
+		AuthURL:   DefaultAuthURL,
 		KeySource: SourceNone,
 	}
 
 	// Load the file first so flag/env can override it.
-	fc, err := loadFile()
+	fc, err := LoadFile()
 	if err != nil {
 		return cfg, err
 	}
@@ -65,6 +96,14 @@ func Resolve(apiKeyFlag, baseURLFlag string) (Config, error) {
 	if fc.BaseURL != "" {
 		cfg.BaseURL = fc.BaseURL
 	}
+	if fc.AuthURL != "" {
+		cfg.AuthURL = fc.AuthURL
+	}
+	cfg.SessionToken = fc.SessionToken
+	cfg.RefreshToken = fc.RefreshToken
+	cfg.SessionExpiry = fc.SessionExpiry
+	cfg.APIKeyID = fc.APIKeyID
+	cfg.DefaultOrg = fc.DefaultOrg
 
 	// Environment overrides file.
 	if v := os.Getenv(envAPIKey); v != "" {
@@ -74,6 +113,9 @@ func Resolve(apiKeyFlag, baseURLFlag string) (Config, error) {
 	if v := os.Getenv(envBaseURL); v != "" {
 		cfg.BaseURL = v
 	}
+	if v := os.Getenv(envAuthURL); v != "" {
+		cfg.AuthURL = v
+	}
 
 	// Flags override everything.
 	if apiKeyFlag != "" {
@@ -82,6 +124,9 @@ func Resolve(apiKeyFlag, baseURLFlag string) (Config, error) {
 	}
 	if baseURLFlag != "" {
 		cfg.BaseURL = baseURLFlag
+	}
+	if authURLFlag != "" {
+		cfg.AuthURL = authURLFlag
 	}
 
 	return cfg, nil
@@ -121,10 +166,10 @@ func SchemasDir() (string, error) {
 	return filepath.Join(home, "schemas"), nil
 }
 
-// loadFile reads and parses the config file. A missing file is not an error,
-// it just yields an empty fileConfig.
-func loadFile() (fileConfig, error) {
-	var fc fileConfig
+// LoadFile reads and parses the config file. A missing file is not an error,
+// it just yields an empty File.
+func LoadFile() (File, error) {
+	var fc File
 
 	path, err := ConfigPath()
 	if err != nil {
@@ -162,14 +207,43 @@ func loadFile() (fileConfig, error) {
 			fc.APIKey = v
 		case "base_url":
 			fc.BaseURL = v
+		case "auth_url":
+			fc.AuthURL = v
+		case "session_token":
+			fc.SessionToken = v
+		case "refresh_token":
+			fc.RefreshToken = v
+		case "session_expiry":
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				fc.SessionExpiry = t
+			}
+		case "api_key_id":
+			fc.APIKeyID = v
+		case "default_org":
+			fc.DefaultOrg = v
 		}
 	}
 	return fc, nil
 }
 
-// Save writes the API key (and base URL if non-default) to the config file
-// with 0600 permissions. It creates the parent directory as needed.
+// Save writes the API key (and base URL if non-default) to the config file with
+// 0600 permissions, preserving any session already stored so signing in and then
+// setting a key by hand does not silently log you out.
 func Save(apiKey, baseURL string) error {
+	fc, err := LoadFile()
+	if err != nil {
+		return err
+	}
+	fc.APIKey = apiKey
+	if baseURL != "" {
+		fc.BaseURL = baseURL
+	}
+	return SaveFile(fc)
+}
+
+// SaveFile writes the whole config file with 0600 permissions, creating the
+// parent directory as needed. Empty fields are omitted rather than written blank.
+func SaveFile(fc File) error {
 	path, err := ConfigPath()
 	if err != nil {
 		return err
@@ -178,20 +252,52 @@ func Save(apiKey, baseURL string) error {
 		return err
 	}
 
-	apiKeyJSON, err := json.Marshal(apiKey)
-	if err != nil {
-		return fmt.Errorf("encode api key: %w", err)
-	}
-
 	var b strings.Builder
 	b.WriteString("# tabstack CLI configuration\n")
-	b.WriteString("api_key = " + string(apiKeyJSON) + "\n")
-	if baseURL != "" && baseURL != DefaultBaseURL {
-		baseURLJSON, err := json.Marshal(baseURL)
-		if err != nil {
-			return fmt.Errorf("encode base url: %w", err)
+
+	write := func(key, value string) error {
+		if value == "" {
+			return nil
 		}
-		b.WriteString("base_url = " + string(baseURLJSON) + "\n")
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("encode %s: %w", key, err)
+		}
+		b.WriteString(key + " = " + string(encoded) + "\n")
+		return nil
+	}
+
+	if err := write("api_key", fc.APIKey); err != nil {
+		return err
+	}
+	if err := write("api_key_id", fc.APIKeyID); err != nil {
+		return err
+	}
+	// Only persist the URLs when they differ from the built-in defaults, so the
+	// file stays readable and upgrades pick up new defaults.
+	if fc.BaseURL != DefaultBaseURL {
+		if err := write("base_url", fc.BaseURL); err != nil {
+			return err
+		}
+	}
+	if fc.AuthURL != DefaultAuthURL {
+		if err := write("auth_url", fc.AuthURL); err != nil {
+			return err
+		}
+	}
+	if err := write("session_token", fc.SessionToken); err != nil {
+		return err
+	}
+	if err := write("refresh_token", fc.RefreshToken); err != nil {
+		return err
+	}
+	if !fc.SessionExpiry.IsZero() {
+		if err := write("session_expiry", fc.SessionExpiry.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	if err := write("default_org", fc.DefaultOrg); err != nil {
+		return err
 	}
 
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {

@@ -34,6 +34,7 @@ type app struct {
 var (
 	flagAPIKey  string
 	flagBaseURL string
+	flagAuthURL string
 	flagOutput  string
 	flagNoColor bool
 	flagTimeout time.Duration
@@ -65,7 +66,8 @@ func NewRootCmd() *cobra.Command {
 
 	pf := root.PersistentFlags()
 	pf.StringVar(&flagAPIKey, "api-key", "", "API key (overrides env and config file)")
-	pf.StringVar(&flagBaseURL, "base-url", "", "API base URL")
+	pf.StringVar(&flagBaseURL, "base-url", "", "product API base URL")
+	pf.StringVar(&flagAuthURL, "auth-url", "", "console URL for sign-in and key management")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
 	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
@@ -76,6 +78,7 @@ func NewRootCmd() *cobra.Command {
 		newGenerateCmd(),
 		newSchemaCmd(),
 		newAuthCmd(),
+		newKeysCmd(),
 	)
 
 	return root
@@ -117,7 +120,7 @@ func newRenderer() (ui.Renderer, error) {
 // setupApp resolves config, validates the key, and builds the client. It is the
 // pre-run for every command that talks to the API.
 func setupApp() error {
-	cfg, err := config.Resolve(flagAPIKey, flagBaseURL)
+	cfg, err := config.ResolveWithAuth(flagAPIKey, flagBaseURL, flagAuthURL)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
@@ -149,7 +152,7 @@ func setupApp() error {
 // client (auth status/login). Config is still resolved so `auth status` can
 // report the key source.
 func setupRendererOnly() error {
-	cfg, err := config.Resolve(flagAPIKey, flagBaseURL)
+	cfg, err := config.ResolveWithAuth(flagAPIKey, flagBaseURL, flagAuthURL)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}

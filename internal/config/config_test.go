@@ -132,7 +132,7 @@ malformed line
 		t.Fatal(err)
 	}
 
-	fc, err := loadFile()
+	fc, err := LoadFile()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestSaveAndLoadSpecialChars(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fc, err := loadFile()
+	fc, err := LoadFile()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestSaveAndLoadNormal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fc, err := loadFile()
+	fc, err := LoadFile()
 	if err != nil {
 		t.Fatal(err)
 	}
