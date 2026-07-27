@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"os/exec"
@@ -284,7 +285,12 @@ func newCallbackHandler(expectedState, authURL string, results chan<- callbackRe
 			return
 		}
 
-		fmt.Fprint(w, page("Signed in", "Signed in. You can close this tab and return to your terminal."))
+		// On success, send the browser on to the console rather than leaving it
+		// parked on the loopback page. A meta refresh (not a 302) keeps a 200 with
+		// a visible fallback link and does not depend on JavaScript; the redirect
+		// target is the configured auth host, never anything from the callback
+		// query, so no code or state leaks onward.
+		fmt.Fprint(w, successPage(authURL))
 		flush(w)
 		deliver(callbackResult{code: code})
 	})
@@ -306,6 +312,24 @@ func page(title, body string) string {
 	return "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + title +
 		"</title></head><body style=\"font-family:system-ui,sans-serif;padding:3rem\"><p>" +
 		body + "</p></body></html>"
+}
+
+// successPage renders the signed-in page, redirecting to the console via a meta
+// refresh with a manual link as a fallback. redirectURL is the trusted auth
+// host, not user input; it is HTML-escaped anyway. With no URL it falls back to
+// the static "return to your terminal" page.
+func successPage(redirectURL string) string {
+	if strings.TrimSpace(redirectURL) == "" {
+		return page("Signed in", "Signed in. You can close this tab and return to your terminal.")
+	}
+	esc := html.EscapeString(redirectURL)
+	return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+		"<meta http-equiv=\"refresh\" content=\"0;url=" + esc + "\">" +
+		"<title>Signed in</title></head>" +
+		"<body style=\"font-family:system-ui,sans-serif;padding:3rem\"><p>" +
+		"Signed in. Redirecting to the console&hellip; " +
+		"If you are not redirected, <a href=\"" + esc + "\">continue</a>, " +
+		"or return to your terminal.</p></body></html>"
 }
 
 // sameURL compares two URLs for issuer purposes, ignoring a trailing slash.

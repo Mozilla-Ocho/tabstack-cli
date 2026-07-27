@@ -151,6 +151,45 @@ func TestCallbackHandlerDeliversOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestCallbackSuccessRedirectsToConsole(t *testing.T) {
+	const authURL = "https://console.example"
+	const state = "STATEtokenZZZ"
+	results := make(chan callbackResult, 1)
+	srv := httptest.NewServer(newCallbackHandler(state, authURL, results))
+	t.Cleanup(srv.Close)
+
+	// Do not follow the redirect; assert on the page the loopback returns.
+	client := srv.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	resp, err := client.Get(srv.URL + "/callback?code=CODEtokenYYY&state=" + state)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readAll(t, resp)
+
+	if !strings.Contains(body, `http-equiv="refresh"`) || !strings.Contains(body, authURL) {
+		t.Errorf("success page does not redirect to the console:\n%s", body)
+	}
+	// The redirect must not carry the code or state onward.
+	for _, secret := range []string{"CODEtokenYYY", state} {
+		if strings.Contains(body, secret) {
+			t.Errorf("redirect page leaked %q", secret)
+		}
+	}
+}
+
+func TestSuccessPageWithoutURLFallsBackToStaticPage(t *testing.T) {
+	got := successPage("")
+	if strings.Contains(got, "http-equiv=\"refresh\"") {
+		t.Error("empty URL should not produce a redirect")
+	}
+	if !strings.Contains(got, "return to your terminal") {
+		t.Errorf("fallback page missing terminal guidance:\n%s", got)
+	}
+}
+
 func TestKeySetupModeFrom(t *testing.T) {
 	cases := []struct {
 		name    string
