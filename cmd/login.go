@@ -120,7 +120,14 @@ func runLogin(ctx context.Context, mode keySetupMode, orgHint string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() { _ = srv.Serve(ln) }()
-	defer func() { _ = srv.Close() }()
+	defer func() {
+		// Shutdown (not Close) so an in-flight response finishes writing; Close
+		// can tear the connection down mid-write and the browser gets a reset
+		// instead of the page.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 
 	fmt.Fprintf(r.Err, "Opening your browser to sign in:\n  %s\n", authURL)
 	if err := openBrowser(authURL); err != nil {
@@ -242,6 +249,7 @@ func newCallbackHandler(expectedState, authURL string, results chan<- callbackRe
 		fail := func(status int, err error) {
 			w.WriteHeader(status)
 			fmt.Fprint(w, page("Sign-in failed", "Sign-in failed. Return to your terminal for details."))
+			flush(w)
 			deliver(callbackResult{err: err})
 		}
 
@@ -277,8 +285,19 @@ func newCallbackHandler(expectedState, authURL string, results chan<- callbackRe
 		}
 
 		fmt.Fprint(w, page("Signed in", "Signed in. You can close this tab and return to your terminal."))
+		flush(w)
 		deliver(callbackResult{code: code})
 	})
+}
+
+// flush pushes the response body to the client now, so the graceful shutdown
+// that follows tears down an already-delivered page rather than an in-flight
+// one. The body flushes on handler return anyway, but the failure path returns
+// in milliseconds, exactly when the page matters most.
+func flush(w http.ResponseWriter) {
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // page renders the minimal callback response body. No credentials, no query

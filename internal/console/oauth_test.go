@@ -157,6 +157,11 @@ func TestExchangeCodeSendsFormEncodedGrant(t *testing.T) {
 			t.Errorf("form %s = %q, want %q", k, got, v)
 		}
 	}
+	// A label names the session so devices are distinguishable in `auth
+	// sessions`; without it the server falls back to the User-Agent.
+	if gotForm.Get("label") == "" {
+		t.Error("exchange did not send a session label")
+	}
 	if tok.AccessToken != "tcli_new" || tok.RefreshToken != "rt_new" || tok.ExpiresIn != 3600 {
 		t.Errorf("token = %+v", tok)
 	}

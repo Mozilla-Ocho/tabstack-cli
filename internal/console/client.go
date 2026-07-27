@@ -225,14 +225,22 @@ func decodeError(resp *http.Response) *APIError {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 
 	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+		Message          string `json:"message"`
 	}
 	apiErr := &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(data))}
-	if json.Unmarshal(data, &payload) == nil && (payload.Error != "" || payload.Message != "") {
+	if json.Unmarshal(data, &payload) == nil && (payload.Error != "" || payload.ErrorDescription != "" || payload.Message != "") {
 		apiErr.Code = payload.Error
-		apiErr.Message = payload.Message
-		if apiErr.Message == "" {
+		// Prefer the human-readable detail. The console carries it in
+		// error_description (e.g. "Name has already been taken for this
+		// organization"); falling back to the bare error code would drop it.
+		switch {
+		case payload.Message != "":
+			apiErr.Message = payload.Message
+		case payload.ErrorDescription != "":
+			apiErr.Message = payload.ErrorDescription
+		default:
 			apiErr.Message = payload.Error
 		}
 	}

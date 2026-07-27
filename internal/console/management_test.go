@@ -308,6 +308,27 @@ func TestManagementAPIErrors(t *testing.T) {
 	}
 }
 
+func TestAPIErrorFallsBackToErrorDescription(t *testing.T) {
+	c, _, _ := withSession(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"invalid_request","error_description":"Name has already been taken for this organization"}`))
+	})
+
+	_, err := c.Organizations(context.Background())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v (%T), want *APIError", err, err)
+	}
+	// The human detail is in error_description; the message must not collapse to
+	// the bare "invalid_request" code.
+	if apiErr.Code != "invalid_request" {
+		t.Errorf("code = %q", apiErr.Code)
+	}
+	if apiErr.Message != "Name has already been taken for this organization" {
+		t.Errorf("message = %q, want the error_description text", apiErr.Message)
+	}
+}
+
 func TestManagementWithoutSessionFailsClosed(t *testing.T) {
 	c := New("https://console.example")
 	if _, err := c.Me(context.Background()); !errors.Is(err, ErrNoSession) {

@@ -203,6 +203,82 @@ func TestRefreshInvalidGrantMeansSessionExpired(t *testing.T) {
 	}
 }
 
+func TestRefreshAdoptsSiblingRotationOnInvalidGrant(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Session: &config.Session{
+		AccessToken:  "tcli_stale",
+		RefreshToken: "rt_old",
+		ExpiresAt:    now.Add(-time.Minute),
+	}}
+	store := &memStore{cfg: cfg}
+
+	var calls int32
+	sm := NewSessionManager(func(_ context.Context, rt string) (*TokenResponse, error) {
+		atomic.AddInt32(&calls, 1)
+		// A sibling process rotated first and persisted a fresh, still-valid
+		// session before our stale token was rejected.
+		_ = store.Save(&config.Config{Session: &config.Session{
+			AccessToken:  "tcli_sibling",
+			RefreshToken: "rt_sibling",
+			ExpiresAt:    now.Add(time.Hour),
+		}})
+		return nil, &OAuthError{StatusCode: 400, Code: ErrCodeInvalidGrant}
+	}, store, cfg)
+	sm.now = fixedNow(now)
+
+	tok, err := sm.ForceRefresh(context.Background())
+	if err != nil {
+		t.Fatalf("ForceRefresh: %v", err)
+	}
+	if tok != "tcli_sibling" {
+		t.Errorf("token = %q, want the sibling's access token", tok)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("refresh calls = %d, want 1 (adopt without a retry)", got)
+	}
+	if sm.cfg.Session.RefreshToken != "rt_sibling" {
+		t.Errorf("in-memory refresh token = %q, want the adopted rt_sibling", sm.cfg.Session.RefreshToken)
+	}
+}
+
+func TestRefreshRetriesWithSiblingTokenWhenSiblingAccessAlsoStale(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Session: &config.Session{
+		AccessToken:  "tcli_stale",
+		RefreshToken: "rt_old",
+		ExpiresAt:    now.Add(-time.Minute),
+	}}
+	store := &memStore{cfg: cfg}
+
+	var seen []string
+	sm := NewSessionManager(func(_ context.Context, rt string) (*TokenResponse, error) {
+		seen = append(seen, rt)
+		if rt == "rt_old" {
+			// Sibling rotated, but its access token is already stale too.
+			_ = store.Save(&config.Config{Session: &config.Session{
+				AccessToken:  "tcli_sibling_stale",
+				RefreshToken: "rt_sibling",
+				ExpiresAt:    now.Add(-time.Minute),
+			}})
+			return nil, &OAuthError{StatusCode: 400, Code: ErrCodeInvalidGrant}
+		}
+		return &TokenResponse{AccessToken: "tcli_new", RefreshToken: "rt_new", ExpiresIn: 3600}, nil
+	}, store, cfg)
+	sm.now = fixedNow(now)
+
+	tok, err := sm.ForceRefresh(context.Background())
+	if err != nil {
+		t.Fatalf("ForceRefresh: %v", err)
+	}
+	if tok != "tcli_new" {
+		t.Errorf("token = %q, want tcli_new from the retry", tok)
+	}
+	want := []string{"rt_old", "rt_sibling"}
+	if len(seen) != 2 || seen[0] != want[0] || seen[1] != want[1] {
+		t.Errorf("refresh tokens tried = %v, want %v", seen, want)
+	}
+}
+
 func TestTokenWithoutSession(t *testing.T) {
 	cfg := &config.Config{}
 	sm := NewSessionManager(nil, &memStore{cfg: cfg}, cfg)

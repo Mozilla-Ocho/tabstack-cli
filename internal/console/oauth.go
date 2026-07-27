@@ -135,7 +135,23 @@ func (c *Client) ExchangeCode(ctx context.Context, code, verifier, redirectURI s
 	form.Set("redirect_uri", redirectURI)
 	form.Set("client_id", ClientID)
 	form.Set("code_verifier", verifier)
+	// label names this session in `auth sessions` and the dashboard. Without it
+	// the server falls back to the User-Agent, so every device shows up as
+	// "Go-http-client/1.1" and cannot be told apart when revoking one.
+	if label := deviceLabel(); label != "" {
+		form.Set("label", label)
+	}
 	return c.token(ctx, form)
+}
+
+// deviceLabel is a human-friendly name for this machine, used to label the
+// session at login. Falls back to the client id when the hostname is
+// unavailable.
+func deviceLabel() string {
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return ClientID
 }
 
 // Refresh exchanges a refresh token for a new session. The response's

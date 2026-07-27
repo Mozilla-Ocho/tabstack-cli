@@ -106,8 +106,33 @@ func (m *SessionManager) refreshLocked(ctx context.Context) (string, error) {
 
 	tok, err := m.refresh(ctx, refreshToken)
 
+	// Cross-process rotation recovery. A sibling process shares the stored
+	// session (e.g. the MCP server running in Claude Desktop while the CLI is
+	// used in a terminal). If it refreshed first, the server invalidated the
+	// token we just presented, so our refresh fails with invalid_grant even
+	// though nothing is wrong. Re-read the store: if the persisted refresh token
+	// changed, adopt the sibling's session (or retry once with its token)
+	// instead of forcing a needless re-login.
+	var adopted *config.Session
+	if err != nil && IsInvalidGrant(err) {
+		if sib, lerr := m.store.Load(); lerr == nil && sib.Session != nil &&
+			sib.Session.RefreshToken != "" && sib.Session.RefreshToken != refreshToken {
+			if !sib.Session.Expired(m.now(), refreshSkew) {
+				adopted = sib.Session
+				err = nil
+			} else {
+				tok, err = m.refresh(ctx, sib.Session.RefreshToken)
+			}
+		}
+	}
+
 	m.mu.Lock()
 	switch {
+	case adopted != nil:
+		// A sibling already rotated and persisted; take its still-valid token
+		// without another network round trip or a redundant save.
+		m.cfg.Session = adopted
+		call.token = adopted.AccessToken
 	case err != nil && IsInvalidGrant(err):
 		// The refresh token is spent or revoked. Nothing to retry.
 		call.err = ErrSessionExpired
