@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/console"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
@@ -25,15 +27,23 @@ func Version() string { return version }
 // config or rebuild the client. This is the small bit of glue that keeps each
 // command file focused on just its own request.
 type app struct {
-	cfg      config.Config
+	store    config.CredentialStore
+	cfg      *config.Config
+	key      config.KeyResolution
 	client   *client.Client
 	renderer ui.Renderer
+
+	// orgOverride is the organisation id resolved from --org, empty when the
+	// flag was not used. It is per-invocation only and never written to config.
+	orgOverride string
 }
 
 // persistent flag values, bound on the root command.
 var (
 	flagAPIKey  string
 	flagBaseURL string
+	flagAuthURL string
+	flagOrg     string
 	flagOutput  string
 	flagNoColor bool
 	flagTimeout time.Duration
@@ -41,6 +51,10 @@ var (
 
 // rootApp holds the constructed context for the current invocation.
 var rootApp *app
+
+// uiRenderer is a local alias so the auth and keys commands can take a renderer
+// without every helper signature reaching for the ui package.
+type uiRenderer = ui.Renderer
 
 // NewRootCmd builds the root command tree. main.go calls Execute on it.
 func NewRootCmd() *cobra.Command {
@@ -52,9 +66,10 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
-		// Build the shared app context before any subcommand runs. We skip this
-		// for commands that do not need an API client (auth, help, version) by
-		// checking an annotation, so `auth login` works before a key exists.
+		// Build the shared app context before any subcommand runs. We skip the
+		// product client for commands that do not need one (auth, keys, schema,
+		// help, version) by checking an annotation, so `auth login` works before
+		// any credential exists.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Annotations["skipClient"] == "true" {
 				return setupRendererOnly()
@@ -64,11 +79,17 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagAPIKey, "api-key", "", "API key (overrides env and config file)")
-	pf.StringVar(&flagBaseURL, "base-url", "", "API base URL")
+	pf.StringVar(&flagAPIKey, "api-key", "", "API key (overrides env and stored keys)")
+	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
+	pf.StringVar(&flagBaseURL, "base-url", "", "product API base URL")
+	pf.StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")
+	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
 	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	// --key is the documented short form in the credential precedence; keep the
+	// help output to one entry rather than two that mean the same thing.
+	_ = pf.MarkHidden("key")
 
 	root.AddCommand(
 		newAgentCmd(),
@@ -76,6 +97,9 @@ func NewRootCmd() *cobra.Command {
 		newGenerateCmd(),
 		newSchemaCmd(),
 		newAuthCmd(),
+		newKeysCmd(),
+		newConfigCmd(),
+		newMCPCmd(),
 	)
 
 	return root
@@ -114,52 +138,105 @@ func newRenderer() (ui.Renderer, error) {
 	}, nil
 }
 
-// setupApp resolves config, validates the key, and builds the client. It is the
-// pre-run for every command that talks to the API.
+// setupApp loads config, resolves the product credential, and builds the client.
+// It is the pre-run for every command that talks to the product API.
 func setupApp() error {
-	cfg, err := config.Resolve(flagAPIKey, flagBaseURL)
+	base, err := setupBase()
 	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
-	}
-	if cfg.APIKey == "" {
-		// Missing key is a configuration error, not transient: exit 2 so agents
-		// treat it as non-retryable rather than retrying with backoff (exit 1).
-		return withCode(2, fmt.Errorf("no API key found. Set one with `tabstack auth login`, the %s environment variable, or --api-key", "TABSTACK_API_KEY"))
+		return err
 	}
 
-	renderer, err := newRenderer()
+	if flagOrg != "" {
+		id, err := resolveOrgLocal(base.cfg, flagOrg)
+		if err != nil {
+			return withCode(2, err)
+		}
+		base.orgOverride = id
+	}
+
+	res, err := base.cfg.ResolveAPIKey(config.KeyRequest{Flag: flagAPIKey, OrgOverride: base.orgOverride})
 	if err != nil {
+		// A missing or unusable credential is a configuration error, not a
+		// transient one: exit 2 so agents treat it as non-retryable rather than
+		// retrying with backoff (exit 1).
+		if errors.Is(err, config.ErrNoAPIKey) {
+			return withCode(2, fmt.Errorf("no API key found. Run `tabstack auth login`, or set %s, or pass --api-key", config.EnvAPIKey))
+		}
 		return withCode(2, err)
 	}
+	base.key = res
 
 	var opts []client.Option
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
 	}
+	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), opts...)
 
-	rootApp = &app{
-		cfg:      cfg,
-		client:   client.New(cfg.APIKey, cfg.BaseURL, opts...),
-		renderer: renderer,
+	// When --org is in play, say which organisation we are acting as. It goes to
+	// stderr so it shows up in logs and terminals without contaminating piped
+	// stdout.
+	if base.orgOverride != "" {
+		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s)\n",
+			base.cfg.OrgName(base.orgOverride), base.orgOverride)
 	}
+
+	rootApp = base
 	return nil
 }
 
-// setupRendererOnly builds just the renderer for commands that do not need a
-// client (auth status/login). Config is still resolved so `auth status` can
-// report the key source.
+// setupRendererOnly builds the renderer and loads config for commands that do
+// not need a product client (auth, keys, schema). No credential is required, so
+// these still work on a fresh install.
 func setupRendererOnly() error {
-	cfg, err := config.Resolve(flagAPIKey, flagBaseURL)
+	base, err := setupBase()
 	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
+		return err
 	}
+	rootApp = base
+	return nil
+}
+
+// setupBase does the work common to both setups: renderer, credential store,
+// and config load.
+func setupBase() (*app, error) {
 	renderer, err := newRenderer()
 	if err != nil {
-		return withCode(2, err)
+		return nil, withCode(2, err)
 	}
-	rootApp = &app{
-		cfg:      cfg,
-		renderer: renderer,
+
+	store, err := newStore()
+	if err != nil {
+		return nil, fmt.Errorf("locate configuration: %w", err)
 	}
-	return nil
+	cfg, err := store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load configuration: %w", err)
+	}
+
+	return &app{store: store, cfg: cfg, renderer: renderer}, nil
+}
+
+// newStore builds the credential store. It is a package var so tests can point
+// the whole command tree at a temporary config file.
+var newStore = func() (config.CredentialStore, error) {
+	return config.NewFileStore()
+}
+
+// consoleClient builds a client for the auth host with the current session
+// attached. Every command that talks to /cli/* goes through this so the session
+// is refreshed and persisted in one place.
+func consoleClient() (*console.Client, *console.SessionManager) {
+	c := console.New(rootApp.cfg.ResolveAuthURL(flagAuthURL))
+	sm := c.AttachSession(rootApp.store, rootApp.cfg)
+	return c, sm
+}
+
+// requireSession returns a console client only when a session is stored, so
+// commands can fail with the login hint before making a request.
+func requireSession() (*console.Client, *console.SessionManager, error) {
+	if rootApp.cfg.Session == nil || rootApp.cfg.Session.AccessToken == "" {
+		return nil, nil, withCode(2, errors.New("not signed in. Run: tabstack auth login"))
+	}
+	c, sm := consoleClient()
+	return c, sm, nil
 }

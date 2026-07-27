@@ -101,6 +101,50 @@ func promptChoice(prompt, keys string, def byte) (byte, error) {
 	}
 }
 
+// promptLine reads one line of free-form input from an interactive stdin. It is
+// the picker counterpart to promptChoice, for lists too long to give every entry
+// a letter. Like promptChoice it prompts on stderr and returns errNotTerminal
+// when there is nobody to ask.
+func promptLine(prompt string) (string, error) {
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return "", errNotTerminal
+	}
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return "", errNotTerminal
+	}
+	return strings.TrimSpace(line), nil
+}
+
+// envAny reports whether any of the named environment variables is set to a
+// non-empty value.
+func envAny(names ...string) bool {
+	for _, n := range names {
+		if os.Getenv(n) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateKeyFormat is a sanity check on an API key before it is stored: no
+// embedded whitespace or quotes that would corrupt the config file, and long
+// enough to be a real credential. It makes no API call.
+func validateKeyFormat(key string) error {
+	if strings.ContainsAny(key, "\"\n\r\t") {
+		return fmt.Errorf("key contains invalid characters (newline, tab, or quote)")
+	}
+	if strings.TrimSpace(key) != key {
+		return fmt.Errorf("key must not have leading or trailing whitespace")
+	}
+	if len(key) < 8 {
+		return fmt.Errorf("key is too short to be valid (got %d characters)", len(key))
+	}
+	return nil
+}
+
 // exitErr wraps an error with a specific process exit code. main.go inspects
 // for this so different failure classes map to different codes, which makes the
 // CLI scriptable: 1 runtime/network, 2 usage (cobra default), 3 API error.

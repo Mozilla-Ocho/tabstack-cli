@@ -3,6 +3,7 @@ package cmd
 import (
 	"testing"
 
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
@@ -11,9 +12,11 @@ import (
 func isolate(t *testing.T) {
 	t.Helper()
 	o, a, b, nc, to := flagOutput, flagAPIKey, flagBaseURL, flagNoColor, flagTimeout
+	org, auth := flagOrg, flagAuthURL
 	prev := rootApp
 	t.Cleanup(func() {
 		flagOutput, flagAPIKey, flagBaseURL, flagNoColor, flagTimeout = o, a, b, nc, to
+		flagOrg, flagAuthURL = org, auth
 		rootApp = prev
 	})
 }
@@ -84,8 +87,11 @@ func TestSetupApp(t *testing.T) {
 	if err := setupApp(); err != nil {
 		t.Fatalf("setupApp: %v", err)
 	}
-	if rootApp.cfg.APIKey != "secret-key-123" {
-		t.Errorf("api key = %q", rootApp.cfg.APIKey)
+	if rootApp.key.APIKey != "secret-key-123" {
+		t.Errorf("api key = %q", rootApp.key.APIKey)
+	}
+	if rootApp.key.Source != config.SourceEnv {
+		t.Errorf("key source = %q, want %q", rootApp.key.Source, config.SourceEnv)
 	}
 	if rootApp.client == nil {
 		t.Error("client not built")
