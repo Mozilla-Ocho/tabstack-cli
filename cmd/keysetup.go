@@ -88,7 +88,7 @@ func runKeySetup(ctx context.Context, c *console.Client, orgID string, mode keyS
 	case keySetupCreate:
 		return createAndStoreKey(ctx, c, orgID, defaultKeyName())
 	case keySetupExisting:
-		return adoptExistingKey(ctx, c, orgID)
+		return adoptKey(ctx, c, orgID, "")
 	default:
 		fmt.Fprintf(r.Err, "no API key stored for %s, run: tabstack keys create --org %s\n", name, orgID)
 		return nil
@@ -154,9 +154,12 @@ func createAndStoreKey(ctx context.Context, c *console.Client, orgID, name strin
 	return nil
 }
 
-// adoptExistingKey reveals an existing key and stores it. Only reachable while
+// adoptKey reveals one of an organisation's existing keys and stores it. With
+// keyID empty it selects a key: the only one when there is a single candidate,
+// otherwise an interactive prompt. With keyID set it adopts that key directly
+// (no prompt), so it works non-interactively. Only reachable while
 // console.RevealEnabled is true.
-func adoptExistingKey(ctx context.Context, c *console.Client, orgID string) error {
+func adoptKey(ctx context.Context, c *console.Client, orgID, keyID string) error {
 	if !console.RevealEnabled {
 		return withCode(2, errors.New("adopting an existing key is not available in this build; use `tabstack keys create`"))
 	}
@@ -169,32 +172,18 @@ func adoptExistingKey(ctx context.Context, c *console.Client, orgID string) erro
 		return classifyConsoleError(err)
 	}
 	if len(keys) == 0 {
-		// "use existing" was asked for explicitly (a flag, or a prompt that only
-		// offers it when a key exists), so an empty list is an error, not a
+		// Adoption was asked for explicitly (a flag, a prompt that only offers it
+		// when a key exists, or `keys use`), so an empty list is an error, not a
 		// silent switch to creating one.
 		return withCode(2, fmt.Errorf("%s has no existing API key to adopt; run: tabstack keys create --org %s",
 			cfg.OrgName(orgID), orgID))
 	}
 
-	var chosen console.APIKey
-	if len(keys) == 1 {
-		// Only one candidate: adopt it without asking, so this works on a
-		// non-interactive --api-key-setup=existing too.
-		chosen = keys[0]
-	} else {
-		for i, k := range keys {
-			fmt.Fprintf(r.Err, "  %d) %s %s\n", i+1, k.Name, r.Styles.Muted.Render(k.Preview))
-		}
-		line, err := promptLine(fmt.Sprintf("Which key? [1-%d]: ", len(keys)))
-		if err != nil {
-			return withCode(2, errors.New("choosing among multiple keys requires a terminal; use --api-key-setup=create or run interactively"))
-		}
-		idx, convErr := strconv.Atoi(strings.TrimSpace(line))
-		if convErr != nil || idx < 1 || idx > len(keys) {
-			return withCode(2, fmt.Errorf("not a valid choice: %q", line))
-		}
-		chosen = keys[idx-1]
+	chosen, err := chooseKey(r, keys, keyID)
+	if err != nil {
+		return err
 	}
+
 	revealed, err := c.RevealAPIKey(ctx, chosen.ID)
 	if err != nil {
 		return classifyConsoleError(err)
@@ -211,6 +200,41 @@ func adoptExistingKey(ctx context.Context, c *console.Client, orgID string) erro
 	fmt.Fprintf(r.Out, "%s stored existing key %s %s\n", r.Styles.Success.Render("✓"),
 		chosen.Name, r.Styles.Muted.Render(config.Redact(revealed.APIKey)))
 	return nil
+}
+
+// chooseKey picks which key to adopt from a non-empty list. A given keyID must
+// match exactly by id; with no keyID it takes the sole candidate, or prompts
+// when there is more than one.
+func chooseKey(r uiRenderer, keys []console.APIKey, keyID string) (console.APIKey, error) {
+	if keyID != "" {
+		for _, k := range keys {
+			if k.ID == keyID {
+				return k, nil
+			}
+		}
+		for _, k := range keys {
+			fmt.Fprintf(r.Err, "  %s  %s\n", k.ID, r.Styles.Muted.Render(k.Name))
+		}
+		return console.APIKey{}, withCode(2, fmt.Errorf("no API key with id %q for this organisation", keyID))
+	}
+
+	if len(keys) == 1 {
+		// One candidate: adopt it without asking, so this works non-interactively.
+		return keys[0], nil
+	}
+
+	for i, k := range keys {
+		fmt.Fprintf(r.Err, "  %d) %s %s\n", i+1, k.Name, r.Styles.Muted.Render(k.Preview))
+	}
+	line, err := promptLine(fmt.Sprintf("Which key? [1-%d]: ", len(keys)))
+	if err != nil {
+		return console.APIKey{}, withCode(2, errors.New("choosing among multiple keys requires a terminal; pass a key id or run interactively"))
+	}
+	idx, convErr := strconv.Atoi(strings.TrimSpace(line))
+	if convErr != nil || idx < 1 || idx > len(keys) {
+		return console.APIKey{}, withCode(2, fmt.Errorf("not a valid choice: %q", line))
+	}
+	return keys[idx-1], nil
 }
 
 // defaultKeyName names created keys after the machine that created them, so

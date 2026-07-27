@@ -142,11 +142,18 @@ credential.
 ```bash
 tabstack keys create --org acme --name cli-laptop   # prints the key once, stores it
 tabstack keys list --org acme                       # previews only, never plaintext
+tabstack keys use <key-id>                          # adopt an existing key into this CLI
+tabstack keys use                                   # pick from a list (or the only one)
 tabstack keys revoke <key-id>                       # also clears it from your config
 ```
 
 Keys created by the CLI are named `cli-<hostname>` by default, so they are
 legible when you come to revoke one in the console.
+
+`keys use` reveals one of the organisation's existing keys and stores it as the
+one this CLI sends, replacing whatever was stored. Pass a key id (from
+`keys list`) to pick directly; with no id, a single key is adopted automatically
+and multiple keys prompt you to choose.
 
 ### Where a product key comes from
 
@@ -233,7 +240,7 @@ it cannot leave you with nothing that works. `--force` overrides that.
 | `tabstack auth switch [org]` | Change the organisation your commands act as |
 | `tabstack auth sessions` | List (and revoke) your CLI sessions |
 | `tabstack auth logout` | Revoke this session, or all of them with `--all` |
-| `tabstack keys create` / `list` / `revoke` | Manage an organisation's API keys |
+| `tabstack keys create` / `list` / `use` / `revoke` | Manage an organisation's API keys |
 | `tabstack config show` | Show stored config for every org, secrets redacted |
 | `tabstack config path` | Print the config file path |
 | `tabstack config drop-legacy-key` | Remove a pre-organisation API key once an org key is in place |

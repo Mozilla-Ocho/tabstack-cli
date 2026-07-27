@@ -101,6 +101,77 @@ func TestKeysListPrintsPreviewsOnly(t *testing.T) {
 	}
 }
 
+// keysServer stands up an auth host that lists two keys and reveals either one.
+func keysServer(t *testing.T, revealHits *int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/cli/api_keys" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"id":"k1","name":"laptop","preview":"key-…1111"},{"id":"k2","name":"ci","preview":"key-…2222"}]`))
+		case r.URL.Path == "/cli/api_keys/k2/reveal":
+			*revealHits++
+			_, _ = w.Write([]byte(`{"api_key":"key-revealed-2222"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestKeysUseAdoptsByIDReplacingTheStoredKey(t *testing.T) {
+	isolate(t)
+	buf := setTestApp(t)
+	cfg := sessionOnly(t)
+	cfg.ActiveOrg = "org_a"
+	org := cfg.UpsertOrg("org_a", "Alpha")
+	org.APIKey = "key-old-1111"
+	org.APIKeyID = "k1"
+	org.APIKeyName = "laptop"
+
+	var reveals int
+	flagAuthURL = keysServer(t, &reveals).URL
+
+	cmd := newKeysUseCmd()
+	cmd.SetContext(context.Background())
+	if err := cmd.RunE(cmd, []string{"k2"}); err != nil {
+		t.Fatalf("keys use: %v", err)
+	}
+
+	if reveals != 1 {
+		t.Errorf("reveal called %d times, want 1", reveals)
+	}
+	got := cfg.Org("org_a")
+	if got.APIKey != "key-revealed-2222" || got.APIKeyID != "k2" || got.APIKeyName != "ci" {
+		t.Errorf("stored key = %+v, want the adopted k2", got)
+	}
+	if !strings.Contains(buf.String(), "ci") {
+		t.Errorf("output does not name the adopted key:\n%s", buf.String())
+	}
+}
+
+func TestKeysUseUnknownIDIsAnError(t *testing.T) {
+	isolate(t)
+	setTestApp(t)
+	cfg := sessionOnly(t)
+	cfg.ActiveOrg = "org_a"
+	cfg.UpsertOrg("org_a", "Alpha")
+
+	var reveals int
+	flagAuthURL = keysServer(t, &reveals).URL
+
+	cmd := newKeysUseCmd()
+	cmd.SetContext(context.Background())
+	err := cmd.RunE(cmd, []string{"nope"})
+	if codeOf(err) != 2 {
+		t.Fatalf("err = %v, want exit code 2", err)
+	}
+	if reveals != 0 {
+		t.Errorf("reveal called %d times for an unknown id, want 0", reveals)
+	}
+}
+
 func TestKeysRevokeClearsTheStoredKey(t *testing.T) {
 	isolate(t)
 	buf := setTestApp(t)

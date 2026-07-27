@@ -20,7 +20,36 @@ func newKeysCmd() *cobra.Command {
 			"commands send. They are managed through your signed-in session, so these\n" +
 			"commands need `tabstack auth login` first.",
 	}
-	cmd.AddCommand(newKeysCreateCmd(), newKeysListCmd(), newKeysRevokeCmd())
+	cmd.AddCommand(newKeysCreateCmd(), newKeysListCmd(), newKeysUseCmd(), newKeysRevokeCmd())
+	return cmd
+}
+
+func newKeysUseCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "use [key-id]",
+		Short: "Adopt one of an organisation's existing API keys into this CLI",
+		Long: "Reveal an existing API key and store it as the one this CLI sends for the\n" +
+			"organisation, replacing any key currently stored. Pass a key id (see\n" +
+			"`tabstack keys list`) to pick directly; with no id, the single key is\n" +
+			"adopted automatically or you are prompted to choose.",
+		Args:        cobra.MaximumNArgs(1),
+		Annotations: map[string]string{"skipClient": "true"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, _, err := requireSession()
+			if err != nil {
+				return err
+			}
+			orgID, err := targetOrg()
+			if err != nil {
+				return err
+			}
+			keyID := ""
+			if len(args) == 1 {
+				keyID = args[0]
+			}
+			return adoptKey(cmd.Context(), c, orgID, keyID)
+		},
+	}
 	return cmd
 }
 
