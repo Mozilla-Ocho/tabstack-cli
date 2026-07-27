@@ -102,6 +102,7 @@ func newAuthLoginCmd() *cobra.Command {
 			if org := findOrg(me.Organizations, me.DefaultOrg); org != nil {
 				fmt.Fprintf(r.Out, "%s %s\n", r.Styles.Key.Render("organization:"), org.Name)
 			}
+			warnMismatchedHosts(r, authURL, rootApp.cfg.BaseURL)
 
 			if err := setupAPIKey(ctx, api, &fc, mode); err != nil {
 				return withCode(1, err)
@@ -654,6 +655,20 @@ func promptForKey() (string, error) {
 		return "", fmt.Errorf("read key: %w", err)
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+// warnMismatchedHosts catches the case where someone signs in to a non-production
+// console while product calls still point at production. The key just issued is
+// only valid against the API paired with that console, so the first request would
+// 401 with nothing to explain why.
+func warnMismatchedHosts(r ui.Renderer, authURL, baseURL string) {
+	if authURL == config.DefaultAuthURL || baseURL != config.DefaultBaseURL {
+		return
+	}
+	fmt.Fprintf(r.Out, "%s signed in to %s, but requests go to %s.\n",
+		r.Styles.ErrorTag.Render("!"), authURL, baseURL)
+	fmt.Fprintf(r.Out, "  The key issued here is only valid against that console's API. Set --base-url or %s.\n",
+		"TABSTACK_BASE_URL")
 }
 
 func findOrg(orgs []console.Organization, id string) *console.Organization {
