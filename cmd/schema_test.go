@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/schemas"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
@@ -36,18 +37,25 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-// setTestApp installs a rootApp with a buffer-backed JSON renderer and restores
-// the previous one on cleanup. Returns the buffer command output is written to.
+// setTestApp installs a rootApp with a buffer-backed JSON renderer, an empty
+// config in a throwaway file store, and restores the previous one on cleanup.
+// Returns the buffer command output is written to.
 func setTestApp(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	prev := rootApp
-	rootApp = &app{renderer: ui.Renderer{
-		Out:    buf,
-		Err:    buf,
-		Mode:   ui.ModeJSON,
-		Styles: ui.NewStyles(true),
-	}}
+	store := config.NewFileStoreAt(filepath.Join(t.TempDir(), "config.toml"))
+	store.Warn = buf
+	rootApp = &app{
+		store: store,
+		cfg:   &config.Config{Version: config.CurrentVersion},
+		renderer: ui.Renderer{
+			Out:    buf,
+			Err:    buf,
+			Mode:   ui.ModeJSON,
+			Styles: ui.NewStyles(true),
+		},
+	}
 	t.Cleanup(func() { rootApp = prev })
 	return buf
 }

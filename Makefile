@@ -5,7 +5,7 @@ LDFLAGS := -ldflags "-s -w -X $(PKG)/cmd.version=$(VERSION)"
 
 GOBIN   := $(shell go env GOPATH)/bin
 
-.PHONY: all build install run fmt vet tidy test lint lint-copy clean smoke snapshot
+.PHONY: all build install run fmt vet tidy test lint lint-copy clean smoke smoke-mcp snapshot
 
 all: build
 
@@ -38,6 +38,9 @@ test: ## Run tests
 
 smoke: build ## Run live API smoke test (needs an API key; SKIP_AGENT=1 to skip costly calls)
 	./scripts/smoke-test.sh
+
+smoke-mcp: build ## Smoke-test the MCP stdio server (offline handshake; set a key or LIVE=1 to call a tool)
+	./scripts/smoke-mcp.sh
 
 lint-copy: ## Check docs/Go copy for em dashes and banned terms
 	./scripts/lint-copy.sh
