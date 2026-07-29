@@ -70,6 +70,10 @@ The client splits on transport, not endpoint:
 
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
 
+### Debug flag
+
+`--debug` (root, persistent) surfaces per-call diagnostics. `client.WithDebug(sink)` (`internal/client/debug.go`) wraps the http transport with a `debugTransport` that times each `RoundTrip` (request → response headers, i.e. server latency / time-to-first-byte, which is also the only meaningful timing for a long-lived stream) and reads the `x-trace-id` and `x-ratelimit-*` response headers into a `DebugInfo`. It composes over `WithHTTPClient`/`WithTimeout` and touches no bodies or credentials. `cmd/debug.go`'s `debugSink` renders each `DebugInfo` to **stderr** (never stdout, so piping and NDJSON stay clean): a compact line in pretty mode, a JSON object under `--output json`. Only product-host calls are instrumented; the `client` package stays free of any `ui` dependency (the sink is a plain `func(DebugInfo)`).
+
 ### Schema pull (third transport)
 
 `schema pull` fetches pre-defined extraction schemas from the public `tabstack-schemas` repo into a local store, so they can be fed to `extract json`. `index.json` at the repo root is the manifest; `schemas.Index.Resolve` maps a selector (bare name, category, or full repo path) onto entries. The on-disk layout mirrors the repo (`<store>/jobs/job-posting.json`) for stable identity. On re-pull, `schemas.Equal` compares canonicalised JSON (key-order/whitespace-insensitive) so only real content drift counts as a conflict; conflicts prompt overwrite/keep/quit on a TTY, and on a non-TTY (or with a customised file and no `--force`) fail with exit 2 rather than silently clobbering local edits. Schema files are written 0644/0755 (not secrets, unlike the 0600 `config.toml`).
