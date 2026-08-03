@@ -433,6 +433,17 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `-o, --output pretty\|json` | Force an output mode (default: auto-detect) |
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
 | `--timeout <dur>` | Request timeout for non-streaming calls, e.g. `30s` |
+| `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
+
+**`--debug`**: for each API call, print a line to **stderr** (so it never
+touches piped stdout) with the HTTP status, elapsed time to first byte, the
+`x-trace-id` request id to quote in a support request, and the rate-limit
+budget. In `--output json` mode the line is a JSON object instead.
+
+```console
+$ tabstack extract markdown https://example.com --debug
+debug POST 200 359ms  trace=e1923436412e811be9fe229131cb0694  ratelimit=999/1000 (resets in 20s)
+```
 
 ## Output & scripting
 

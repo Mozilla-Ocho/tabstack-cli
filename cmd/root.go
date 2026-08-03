@@ -47,6 +47,7 @@ var (
 	flagOutput  string
 	flagNoColor bool
 	flagTimeout time.Duration
+	flagDebug   bool
 )
 
 // rootApp holds the constructed context for the current invocation.
@@ -87,6 +88,7 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
 	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
@@ -169,6 +171,9 @@ func setupApp() error {
 	var opts []client.Option
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
+	}
+	if flagDebug {
+		opts = append(opts, client.WithDebug(debugSink(base.renderer, nil)))
 	}
 	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), opts...)
 
