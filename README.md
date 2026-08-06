@@ -102,7 +102,7 @@ tabstack auth status          # who you are, which org you're acting as, which k
 `https://console.tabstack.ai` in your browser and waits on a loopback listener
 (`http://127.0.0.1:<random-port>/callback`) for the redirect back. Nothing is
 pasted, and no secret is stored in your shell history. If a browser cannot be
-opened, the printed URL still works — open it by hand and the login completes.
+opened, the printed URL still works: open it by hand and the login completes.
 On a machine with no display at all, login fails with a pointer to
 `TABSTACK_API_KEY`, which is the right credential for CI.
 
@@ -127,14 +127,14 @@ tabstack extract markdown "$url" --org other-co   # act as another org for one c
 ```
 
 Switching is a credential change, not a display setting: it decides which key
-goes out. It never signs you in again — the session is user scoped, so switching
+goes out. It never signs you in again: the session is user scoped, so switching
 orgs makes no OAuth request at all. An argument is resolved by exact id, then
 exact name (case-insensitive), then unique name prefix; an ambiguous prefix lists
 every match with its id and exits non-zero rather than guessing.
 
 `--org` is a one-shot override. It never rewrites your active org, it prints the
 org it is acting as to stderr, and if that org has no stored key it fails with
-the exact command to fix it — it will never fall back to a different org's
+the exact command to fix it, and it will never fall back to a different org's
 credential.
 
 ### Managing keys
@@ -178,7 +178,7 @@ tabstack auth logout               # revoke this session; --all revokes every se
 ```
 
 Logging out clears the session and refresh token. It leaves your API keys in
-place — removing those is `tabstack keys revoke`.
+place; removing those is `tabstack keys revoke`.
 
 ### Config and endpoints
 
@@ -195,7 +195,7 @@ tabstack config path     # for scripting: cat "$(tabstack config path)"
 `config show` redacts every key and token to its first and last four characters,
 so the output is safe to paste into a bug report. There is no flag that prints
 them in full. Unlike `auth status`, which covers only the org you are acting as,
-`config show` lists every org the CLI knows about — it answers "which credential
+`config show` lists every org the CLI knows about: it answers "which credential
 would go out if I switched".
 
 | Endpoint | Config key | Env var | Flag |
@@ -327,7 +327,7 @@ tabstack extract json https://example.com --schema-name product-listing --storag
 
 `--schema-name` resolves locally against the store (it never hits the network),
 so it works offline once a schema is pulled. A name that matches more than one
-stored schema is rejected — pass the full `category/name.json` path to
+stored schema is rejected; pass the full `category/name.json` path to
 disambiguate.
 
 Pull records what it fetched, so you can see how your local copies relate to the
@@ -353,7 +353,7 @@ Shell completion suggests schema names for `pull`, `rm`, `path`, and
 
 A selector is a schema name, a category, or a full repo path. When a pulled
 schema already exists locally and differs from the library, you're prompted to
-**overwrite**, **keep** your local copy, or **quit** — so customising a schema
+**overwrite**, **keep** your local copy, or **quit**, so customising a schema
 and re-pulling later never silently discards your edits. Use `--force` to
 overwrite without prompting. In a non-interactive shell a conflict fails (exit 2)
 unless `--force` is given.
@@ -391,7 +391,7 @@ created for the active organisation on first start.
 3. Restart Claude Desktop. The Tabstack tools appear in the tools menu (🔌).
 
 If Claude Desktop reports it can't find the command, use the absolute path to
-the binary instead — its `PATH` differs from your shell's. Find it with
+the binary instead, since its `PATH` differs from your shell's. Find it with
 `which tabstack` and set `"command"` to that (the install script puts it at
 `/usr/local/bin/tabstack`).
 To pin an API key for a non-interactive setup, add

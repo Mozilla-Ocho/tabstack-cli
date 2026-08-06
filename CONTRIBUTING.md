@@ -18,7 +18,7 @@ You need a recent Go toolchain; the required version is pinned in
 ## Development workflow
 
 ```bash
-make lint       # gofmt -w . && go vet ./...
+make lint       # gofmt -w . && go vet ./... && scripts/lint-copy.sh
 make test       # go test ./...
 make smoke      # live API smoke test (needs an API key)
 ```
@@ -26,7 +26,11 @@ make smoke      # live API smoke test (needs an API key)
 Before opening a pull request:
 
 - Run `make lint` and `make test`: CI runs the same checks (`gofmt`, `go vet`,
-  `go build`, `go test -race`) and must pass.
+  copy lint, `go build`, `go test -race`) and must pass.
+- Copy lint (`scripts/lint-copy.sh`) enforces Tabstack voice: no em dashes in
+  `README.md`, `AGENTS.md`, or Go source, and no scraper-family terms <!-- lint-copy: allow -->
+  in docs. For a rare intentional case, append a `lint-copy: allow` comment on
+  the line.
 - Add or update tests for behaviour you change. Network code is testable via
   `client.WithHTTPClient` (inject an `httptest` server). No live calls in unit
   tests.
