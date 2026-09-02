@@ -58,12 +58,18 @@ func newConfigShowCmd() *cobra.Command {
 // else decides otherwise: there is no flag to print them in full.
 func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	k := r.Styles.Key
-	mode, permsOK := config.PermissionsOK(path)
+	mode, exists, permsOK := config.PermissionsState(path)
 
 	fmt.Fprintf(r.Out, "%s %s\n", k.Render("config:"), path)
-	if permsOK {
+	switch {
+	case !exists:
+		// Nothing written yet, so there are no bits to report. Printing the
+		// zero value here read as "permissions: 0", which looks like a fault.
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("permissions:"),
+			r.Styles.Muted.Render("not created yet; written 0600 on first save"))
+	case permsOK:
 		fmt.Fprintf(r.Out, "%s %#o\n", k.Render("permissions:"), mode)
-	} else {
+	default:
 		fmt.Fprintf(r.Out, "%s %#o %s\n", k.Render("permissions:"), mode,
 			r.Styles.ErrorTag.Render(fmt.Sprintf("should be 0600: chmod 600 %s", path)))
 	}

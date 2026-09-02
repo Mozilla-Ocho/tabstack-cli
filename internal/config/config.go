@@ -188,13 +188,24 @@ func migrate(cfg *Config, legacy legacyFields) {
 
 // PermissionsOK reports a config file's permission bits and whether they are
 // owner-only. A missing file counts as fine: there is nothing exposed yet.
+// Callers that need to tell "missing" from "0600" apart want PermissionsState.
 func PermissionsOK(path string) (os.FileMode, bool) {
+	mode, _, ok := PermissionsState(path)
+	return mode, ok
+}
+
+// PermissionsState is PermissionsOK plus whether the file is there at all. The
+// two are worth separating because collapsing them is how `config show` ended
+// up printing "permissions: 0" on a fresh install: mode 0 with ok true is
+// indistinguishable from a real file whose bits are somehow zero, and neither
+// reading is what the user needs to see before the file exists.
+func PermissionsState(path string) (mode os.FileMode, exists bool, ok bool) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return 0, true
+		return 0, false, true
 	}
-	mode := info.Mode().Perm()
-	return mode, mode&0o077 == 0
+	mode = info.Mode().Perm()
+	return mode, true, mode&0o077 == 0
 }
 
 // checkPerms warns when the config is readable by anyone other than its owner.
