@@ -28,9 +28,6 @@ jobs:
             exit 1
           fi
 
-      - name: Lint copy (em dashes, banned terms)
-        run: ./scripts/lint-copy.sh
-
       - name: Vet
         run: go vet ./...
 
@@ -39,3 +36,8 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+      # Copy lint runs last: a stray em dash should not abort the run before
+      # vet/build/test have reported real correctness failures.
+      - name: Lint copy (em dashes, banned terms)
+        run: ./scripts/lint-copy.sh

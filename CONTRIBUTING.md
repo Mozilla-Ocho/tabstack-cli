@@ -29,8 +29,10 @@ Before opening a pull request:
   copy lint, `go build`, `go test -race`) and must pass.
 - Copy lint (`scripts/lint-copy.sh`) enforces Tabstack voice: no em dashes in
   `README.md`, `AGENTS.md`, or Go source, and no scraper-family terms <!-- lint-copy: allow -->
-  in docs. For a rare intentional case, append a `lint-copy: allow` comment on
-  the line.
+  in docs or Go source. En dashes in numeric ranges are fine. New files are
+  linted before they are committed, so run it locally. For a rare intentional
+  case, append a `lint-copy: allow` comment on the line, using that file type's
+  comment syntax (`//` for Go, `<!-- -->` for Markdown).
 - Add or update tests for behaviour you change. Network code is testable via
   `client.WithHTTPClient` (inject an `httptest` server). No live calls in unit
   tests.
