@@ -30,15 +30,29 @@ Key resolution precedence (highest first): `--api-key` flag → `TABSTACK_API_KE
 → config file (`~/.config/tabstack/config.toml`). If no key is found, commands
 that hit the API exit `2` (non-retryable config error) with a clear message.
 
-## Global flags (valid on every command)
+## Global flags
 
-| Flag | Effect |
-|------|--------|
-| `-o, --output pretty\|json` | **Set `json` for agents.** Default auto-detects (pretty on TTY, json when piped). |
-| `--api-key <key>` | API key, overrides env + config. |
-| `--base-url <url>` | API root, overrides env + config. |
-| `--no-color` | Disable ANSI colour (also honours `NO_COLOR`). Irrelevant under `-o json`. |
-| `--timeout <dur>` | Timeout for **non-streaming** calls only, e.g. `30s`, `2m`. Ignored by `automate`/`research`. |
+Only `--output` and `--no-color` are accepted everywhere. The rest are
+registered on the commands that read them, so passing one elsewhere is an
+`unknown flag` error, not a silent no-op.
+
+| Flag | Valid on | Effect |
+|------|----------|--------|
+| `-o, --output pretty\|json` | everything | **Set `json` for agents.** Default auto-detects (pretty on TTY, json when piped). |
+| `--no-color` | everything | Disable ANSI colour (also honours `NO_COLOR`). Irrelevant under `-o json`. |
+| `--api-key <key>` | `extract`, `generate`, `agent`, `mcp` | API key, overrides env + config. |
+| `--base-url <url>` | `extract`, `generate`, `agent`, `mcp`, `config` | API root, overrides env + config. |
+| `--auth-url <url>` | `auth`, `keys`, `config`, `mcp` | Console root, overrides env + config. |
+| `--org <selector>` | `extract`, `generate`, `agent`, `keys`, `auth login` | Act as another org for one command. |
+| `--timeout <dur>` | `extract`, `generate`, `agent`, `mcp` | Timeout for **non-streaming** calls only, e.g. `30s`. Defaults to `2m`; `0` disables. Never applies to `automate`/`research`. |
+| `--debug` | `extract`, `generate`, `agent`, `mcp` | Request id, timing, rate limits, to stderr. |
+
+**Every command emits JSON under `-o json`**, including `auth`, `keys`,
+`config`, and `schema`, so account and configuration state is scriptable the
+same way results are. Exact shapes: [`docs/`](docs/README.md).
+
+**stdout is results; stderr is progress, prompts, and warnings.** Read stdout
+for data and ignore stderr unless you are diagnosing a failure.
 
 ## Input value convention
 
@@ -219,6 +233,10 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
   input. Higher effort/`--no-cache` only helps transient fetch problems.
 - **Streaming output is NDJSON, not a single JSON document.** Parse per line.
 - **`--timeout` does not apply to `automate`/`research`** (a hard timeout would cut
-  the stream). Cancel by killing the process instead.
+  the stream). Cancel by killing the process instead. Non-streaming calls default
+  to a 2-minute deadline; pass `--timeout 0` to disable it.
+- **Irreversible remote actions confirm.** `keys revoke`, `auth logout --all`,
+  and `auth sessions --revoke` prompt on a terminal and **exit `2` without one**.
+  Always pass `--yes` when driving them non-interactively.
 - **`agent input` is unreachable without `--interactive`** on the original run.
 - **One stdin per call.** At most one `-` flag per invocation.

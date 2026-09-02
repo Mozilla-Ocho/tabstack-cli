@@ -211,6 +211,10 @@ would go out if I switched".
 | Product API | `base_url` | `TABSTACK_BASE_URL` | `--base-url` |
 | Auth and management | `auth_url` | `TABSTACK_AUTH_URL` | `--auth-url` |
 
+Two more environment variables have no config or flag equivalent:
+`TABSTACK_OAUTH_SCOPES` overrides the scopes requested at login (provisional,
+and unlikely to be needed), and `NO_COLOR` disables colour.
+
 ### Upgrading from a pre-organisation config
 
 If you already have a config file holding a single `api_key`, it keeps working.
@@ -471,6 +475,30 @@ tabstack extract markdown https://example.com | jq .
 Force a mode with `-o/--output pretty|json`, or disable colour with `--no-color`
 (or the `NO_COLOR` env var). Streaming commands (`automate`, `research`) emit one
 NDJSON line per event in JSON mode.
+
+**Every command honours `--output`**, not just the ones that fetch. `auth`,
+`keys`, `config`, and `schema` all emit structured objects, so account and
+configuration state is scriptable too:
+
+```bash
+tabstack auth status -o json   | jq -r .active_org
+tabstack config show -o json   | jq -r '.orgs[] | select(.active) | .api_key_name'
+tabstack keys list -o json     | jq -r '.[] | select(.stored_in_cli) | .id'
+tabstack schema list --local -o json | jq -r '.[].path'
+tabstack schema pull job-posting -o json | jq -r '.pulled[]'
+```
+
+Secrets stay redacted in JSON exactly as in pretty output; `keys create` is the
+only command that ever prints a key in full, because that is the one moment the
+API returns it.
+
+**stdout is results, stderr is everything else.** Progress lines, prompts, the
+acting-organisation notice, and warnings all go to stderr, so a pipe only ever
+receives data. `tabstack schema pull job-posting 2>/dev/null` yields the summary
+alone.
+
+The exact JSON shape of every command is documented in
+[`docs/`](docs/README.md).
 
 > **Note:** streaming events are parsed with a 4&nbsp;MB per-event buffer. A
 > single event whose payload exceeds that (e.g. an extremely large extracted
