@@ -115,6 +115,11 @@ verbatim and never reshapes it.
 | `--storage <dir>` | where to look for `--schema-name` (default: the config directory) |
 | `--effort`, `--geo`, `--no-cache` | as for `extract markdown` |
 
+A schema describes the **shape** you want, not the values: `{"title":"string"}`
+is example data, `{"type":"object","properties":{"title":{"type":"string"}}}` is
+a schema. A schema with no shape keyword gets a hint on stderr and is sent
+anyway, since the server is the validator.
+
 Exactly one of `--schema` or `--schema-name` is required; passing both is an
 error. `--schema` is validated as JSON locally, so a malformed schema fails
 immediately rather than as an opaque API 400.

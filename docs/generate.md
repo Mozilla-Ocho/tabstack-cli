@@ -33,6 +33,11 @@ tabstack generate json <url> [--flags]
 | `--geo <CC>` | no | fetch via an exit node in this country |
 | `--no-cache` | no | bypass the cache |
 
+A schema describes the **shape** you want, not the values: `{"title":"string"}`
+is example data, `{"type":"object","properties":{"title":{"type":"string"}}}` is
+a schema. A schema with no shape keyword gets a hint on stderr and is sent
+anyway, since the server is the validator.
+
 Exactly one of `--schema` or `--schema-name`. Only one flag may read stdin per
 invocation, so `--schema - --instructions -` is rejected up front. Instructions
 are length-checked locally against the server's limit.

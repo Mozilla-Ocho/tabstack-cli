@@ -282,6 +282,19 @@ tabstack extract json https://example.com --schema '{"type":"object","properties
 tabstack extract json https://example.com --schema-name job-posting
 ```
 
+A schema describes the **shape** you want, not the values. This is the common
+first mistake:
+
+```jsonc
+{"title": "string"}                                        // wrong: example values
+{"type":"object","properties":{"title":{"type":"string"}}} // right: a shape
+```
+
+If a schema has no `type` or `properties` key the CLI prints a hint to stderr
+and **sends the request anyway**, since schemas are validated server-side and a
+local guess should never block a call that would have worked. Browse ready-made
+schemas with `tabstack schema list`.
+
 ### Generate
 
 ```bash

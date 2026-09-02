@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -229,5 +230,59 @@ func TestNewRootCmdWiring(t *testing.T) {
 		if !sub[want] {
 			t.Errorf("root subcommand %q not registered", want)
 		}
+	}
+}
+
+// TestEveryLeafHasAnExample walks the tree and checks each runnable command
+// carries an Example that actually demonstrates *itself*.
+//
+// The second half is the interesting one. Examples were originally inserted by
+// keying on each command's Use string, and "status" is used by both `auth` and
+// `schema`, so `auth status --help` shipped the `schema status` example. A
+// human reading one page cannot tell; a walk over the tree can.
+func TestEveryLeafHasAnExample(t *testing.T) {
+	isolate(t)
+
+	var walk func(*cobra.Command)
+	seen := 0
+	walk = func(c *cobra.Command) {
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+		// Only commands that actually run something need an example; group
+		// commands and cobra's generated helpers do not.
+		if c.RunE == nil && c.Run == nil {
+			return
+		}
+		switch c.Name() {
+		case "help", "completion", "man", "bash", "zsh", "fish", "powershell":
+			return
+		}
+		seen++
+
+		path := c.CommandPath()
+		if c.Example == "" {
+			t.Errorf("%s has no Example", path)
+			return
+		}
+		if !strings.Contains(c.Example, path) {
+			t.Errorf("%s: example does not invoke it, so it probably belongs to another command:\n%s",
+				path, c.Example)
+		}
+		for _, line := range strings.Split(c.Example, "\n") {
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "  ") {
+				t.Errorf("%s: example line is not indented two spaces (fang expects it): %q", path, line)
+			}
+		}
+	}
+	walk(NewRootCmd())
+
+	// Guard the guard: if the walk stops finding commands, the test silently
+	// passes forever.
+	if seen < 24 {
+		t.Errorf("only walked %d runnable commands, expected at least 24", seen)
 	}
 }

@@ -41,6 +41,7 @@ func resolveSchemaArg(schema, schemaName, storage string) (json.RawMessage, erro
 		if err != nil {
 			return nil, withCode(2, err)
 		}
+		warnUnlikelySchema(warnWriter(), raw)
 		return raw, nil
 	}
 
@@ -59,6 +60,9 @@ func resolveSchemaArg(schema, schemaName, storage string) (json.RawMessage, erro
 	if !json.Valid(data) {
 		return nil, withCode(2, fmt.Errorf("stored schema %s is not valid JSON", rel))
 	}
+	// Library schemas always carry a shape, but a locally edited copy might not,
+	// so the stored path gets the same hint as an inline one.
+	warnUnlikelySchema(warnWriter(), json.RawMessage(data))
 	return json.RawMessage(data), nil
 }
 
@@ -445,3 +449,55 @@ func emitJSON(r uiRenderer, v any) error {
 
 // jsonMode reports whether the caller asked for machine-readable output.
 func jsonMode(r uiRenderer) bool { return r.Mode == ui.ModeJSON }
+
+// schemaShapeKeywords are the JSON Schema keywords whose presence means the
+// caller clearly intended a schema. Anything here suppresses the hint below.
+//
+// The set is deliberately wider than just "type" and "properties": a schema of
+// {"$ref": "#/$defs/Job"}, {"enum": [...]}, or {"oneOf": [...]} is perfectly
+// legitimate and carries neither, and a hint that cries wolf on valid input is
+// worse than no hint. "$schema" is excluded on purpose, being metadata rather
+// than structure, so {"$schema": "...", "title": "string"} is still caught.
+var schemaShapeKeywords = []string{
+	"type", "properties", "$ref", "allOf", "anyOf", "oneOf", "not",
+	"enum", "const", "items", "prefixItems", "$defs", "definitions",
+	"patternProperties", "additionalProperties",
+}
+
+// warnUnlikelySchema prints a hint when a supplied schema looks like example
+// data rather than a JSON Schema. The classic first mistake is passing
+// {"title": "string"}, describing the value wanted, where the API expects
+// {"type": "object", "properties": {...}}, describing the shape. Without this
+// the only feedback is an opaque API 400.
+//
+// It is deliberately a hint and not an error. Schemas are server-validated, and
+// a local heuristic must never block a request that would have worked, so this
+// writes to stderr, leaves stdout untouched, and cannot affect the exit code.
+func warnUnlikelySchema(w io.Writer, raw json.RawMessage) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		// Not a JSON object. `true` and `false` are valid schemas, and anything
+		// else is the server's call, so say nothing either way.
+		return
+	}
+	for _, k := range schemaShapeKeywords {
+		if _, ok := obj[k]; ok {
+			return
+		}
+	}
+	fmt.Fprintln(w, `hint: this schema has no "type" or "properties" key, so it may describe example`)
+	fmt.Fprintln(w, `      values rather than a shape. A JSON Schema looks like`)
+	fmt.Fprintln(w, `      {"type":"object","properties":{"title":{"type":"string"}}}, not {"title":"string"}.`)
+	fmt.Fprintln(w, "      Ready-made schemas: `tabstack schema list`. Design guide:")
+	fmt.Fprintln(w, "      https://github.com/Mozilla-Ocho/tabstack-schemas")
+	fmt.Fprintln(w, "      Sending it as given; the server decides.")
+}
+
+// warnWriter is where advisory diagnostics go. It tolerates an unpopulated
+// rootApp so helpers stay callable from tests that never build one.
+func warnWriter() io.Writer {
+	if rootApp == nil {
+		return io.Discard
+	}
+	return rootApp.renderer.Err
+}

@@ -129,6 +129,8 @@ Redaction is not mode-dependent: `config show` and `auth status` emit previews v
 
 `readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
 
+`warnUnlikelySchema` goes one step further for schemas specifically: a JSON object carrying none of the keywords in `schemaShapeKeywords` probably describes example values (`{"title":"string"}`) rather than a shape, which is the commonest first mistake and otherwise surfaces only as an API 400. It is called from `resolveSchemaArg`, **not** `readJSON`, because `readJSON` also backs `--data`, where schema advice would be wrong. It is a hint and never an error: schemas are server-validated, so a local heuristic must not block a request that would have worked. It writes to `warnWriter()` (stderr, or `io.Discard` when `rootApp` is unset) and cannot touch stdout or the exit code. The keyword set is deliberately wider than `type`/`properties` so `$ref`, `enum`, and `oneOf` schemas do not cry wolf.
+
 ## Documentation
 
 `docs/` is the command reference: `docs/README.md` is the index and shared conventions (credentials, key resolution, output rules, exit codes, environment), then one page per command group. Each page documents every subcommand's arguments, flags, examples, and **the exact `--output json` shape**. When adding or changing a command, update its page in the same commit: the JSON shapes written there are the closest thing to a published contract for them.

@@ -44,7 +44,7 @@ func newAuthStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "status",
 		Short:       "Show who you are signed in as and which credential is in play",
-		Example:     "  # What have I changed, and what has moved upstream?\n  tabstack schema status\n\n  # Skip the network; only report local edits\n  tabstack schema status --local",
+		Example:     "  # Who you are, which org you are acting as, which key is in play\n  tabstack auth status\n\n  # Scriptable: the active organisation id\n  tabstack auth status -o json | jq -r .active_org",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer

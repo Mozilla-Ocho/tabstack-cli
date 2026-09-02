@@ -65,6 +65,14 @@ for data and ignore stderr unless you are diagnosing a failure.
 JSON-valued flags are validated locally before the request; invalid JSON fails
 with exit `2` and no network call.
 
+**Schema shape hint.** When a `--schema` value is a JSON object carrying none of
+`type`, `properties`, `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `enum`, `const`,
+`items`, `prefixItems`, `$defs`, `definitions`, `patternProperties`, or
+`additionalProperties`, a hint is written to **stderr** and the request proceeds
+unchanged. It is advisory only: it never alters stdout, the response, or the
+exit code, so do not treat its presence as a failure. It fires on `--schema` and
+`--schema-name`, never on `--data`.
+
 ## Commands
 
 ### `extract markdown <url>`: page → clean Markdown
@@ -101,7 +109,9 @@ Non-streaming. **The response is exactly your schema's shape**, returned verbati
 
 | Flag | Required | Notes |
 |------|----------|-------|
-| `--schema` | **yes** | JSON schema (literal / `@file` / `-`). Must be valid JSON. |
+| `--schema` | one of | JSON schema (literal / `@file` / `-`). Must be valid JSON. Describes a **shape**, not example values. |
+| `--schema-name` | one of | A schema pulled with `tabstack schema pull`, by bare name or repo path. |
+| `--storage <dir>` | no | Where `--schema-name` looks (default: config dir). |
 | `--effort` / `--geo` / `--no-cache` | no | As above. |
 
 Example:

@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -329,5 +331,110 @@ func TestCompleteOrgs(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("completions %v missing %q", got, want)
 		}
+	}
+}
+
+// TestWarnUnlikelySchema pins the heuristic in both directions. False negatives
+// cost a confusing API 400; false positives cry wolf on valid input, which is
+// worse, so the "does not warn" rows matter more than the "warns" ones.
+func TestWarnUnlikelySchema(t *testing.T) {
+	cases := []struct {
+		name     string
+		schema   string
+		wantWarn bool
+	}{
+		// The mistake this exists for: example values, not a shape.
+		{"plain value map", `{"title":"string"}`, true},
+		{"nested value map", `{"job":{"title":"string","salary":"number"}}`, true},
+		{"empty object", `{}`, true},
+		{"metadata only", `{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Job"}`, true},
+
+		// Legitimate schemas that must stay quiet.
+		{"type only", `{"type":"object"}`, false},
+		{"properties only", `{"properties":{"title":{"type":"string"}}}`, false},
+		{"full schema", `{"type":"object","properties":{"title":{"type":"string"}}}`, false},
+		{"ref", `{"$ref":"#/$defs/Job"}`, false},
+		{"oneOf", `{"oneOf":[{"type":"string"},{"type":"number"}]}`, false},
+		{"anyOf", `{"anyOf":[{"type":"string"}]}`, false},
+		{"allOf", `{"allOf":[{"type":"object"}]}`, false},
+		{"enum", `{"enum":["a","b"]}`, false},
+		{"const", `{"const":42}`, false},
+		{"items", `{"items":{"type":"string"}}`, false},
+		{"defs", `{"$defs":{"Job":{"type":"object"}}}`, false},
+
+		// Not an object: `true` and `false` are valid schemas, and anything else
+		// is the server's call.
+		{"true", `true`, false},
+		{"false", `false`, false},
+		{"array", `[1,2,3]`, false},
+		{"string", `"hello"`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			warnUnlikelySchema(&buf, json.RawMessage(tc.schema))
+			got := buf.Len() > 0
+			if got != tc.wantWarn {
+				t.Errorf("warned = %v, want %v (output: %q)", got, tc.wantWarn, buf.String())
+			}
+			if tc.wantWarn {
+				for _, want := range []string{"schema list", "tabstack-schemas"} {
+					if !strings.Contains(buf.String(), want) {
+						t.Errorf("hint does not mention %q: %s", want, buf.String())
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestWarnUnlikelySchemaIsAdvisoryOnly: the hint must go to stderr, leave
+// stdout clean for piping, and never change the exit code. A local heuristic
+// blocking a request the server would have accepted is the failure mode.
+func TestWarnUnlikelySchemaIsAdvisoryOnly(t *testing.T) {
+	isolate(t)
+	out := setTestAppWithClient(t, mockClient(200, `{"title":"Example"}`))
+	var errBuf bytes.Buffer
+	rootApp.renderer.Err = &errBuf
+
+	cmd := newExtractJSONCmd()
+	// A schema that trips the heuristic.
+	if err := cmd.Flags().Set("schema", `{"title":"string"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmd.RunE(cmd, []string{"https://example.com"}); err != nil {
+		t.Fatalf("the hint changed the outcome: %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "hint:") {
+		t.Errorf("no hint on stderr: %q", errBuf.String())
+	}
+	if strings.Contains(out.String(), "hint:") {
+		t.Errorf("hint leaked into stdout, which breaks piping: %q", out.String())
+	}
+	// The result itself is still the only thing on stdout.
+	if !strings.Contains(out.String(), "Example") {
+		t.Errorf("result missing from stdout: %q", out.String())
+	}
+}
+
+// TestValidSchemaStaysSilent is the counterpart: a correct schema produces no
+// stderr noise at all.
+func TestValidSchemaStaysSilent(t *testing.T) {
+	isolate(t)
+	setTestAppWithClient(t, mockClient(200, `{"title":"Example"}`))
+	var errBuf bytes.Buffer
+	rootApp.renderer.Err = &errBuf
+
+	cmd := newExtractJSONCmd()
+	if err := cmd.Flags().Set("schema", `{"type":"object","properties":{"title":{"type":"string"}}}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, []string{"https://example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("valid schema produced stderr noise: %q", errBuf.String())
 	}
 }
