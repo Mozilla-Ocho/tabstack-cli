@@ -100,6 +100,16 @@ The library index is cached per store in `<store>/.index-cache.json` (`schemas.C
 
 Beyond the schema store, `cmd/helpers.go` supplies `fixedCompletions(...)` for the enum flags (`--effort`, `--mode`, `--output`, `--api-key-setup`) and `completeOrgs` for `--org` and the `auth switch` positional. `completeOrgs` reads the config store only and never calls the management API: completion runs on every tab press, and `--org` is defined to resolve locally anyway.
 
+### Cancellation
+
+`cmd/tabstack/main.go` installs one `signal.NotifyContext` (SIGINT, SIGTERM) around the context handed to `fang.Execute`, and every command threads `cmd.Context()` down to its request, so Ctrl-C cancels the call in flight instead of killing the process mid-request. Two `context.Background()` uses survive on purpose: the loopback shutdown in `cmd/login.go` (inheriting cancellation would reset the connection instead of flushing the callback page to the browser) and the completion helper in `cmd/schema.go`, which carries its own short timeout.
+
+`ErrInterrupted` is returned for a cancelled run and rendered by a custom `fang.WithErrorHandler` as a plain `cancelled` line rather than the red ERROR box, since Ctrl-C is the user getting what they asked for. It still exits 1. `classifyError` maps any wrapped `context.Canceled` onto it, because the signal handler is the only thing that cancels the root context.
+
+`--max-duration` (`agent automate`, `agent research`) bounds a **whole stream**, which `--timeout` deliberately never does. `classifyStreamError` tells the two endings apart by which context ended: the signal handler cancels the parent, while `--max-duration` expires only the derived one. Both exit 1, but only expiry explains itself, naming the flag and the elapsed time.
+
+Tests that call a `RunE` directly must `SetContext`: cobra only populates the command context via `Execute`, so `cmd.Context()` is otherwise nil and the request fails with "net/http: nil Context".
+
 ### Streaming outcome handling
 
 Streaming endpoints signal failure **in-band** (a `task:completed`/`complete` event with `success:false`, or an `error` event) rather than via HTTP status. `cmd/agent.go`'s `runStream` watches events to capture the final answer and failure state, then the command maps that onto an exit code. The spinner only animates in pretty mode on a real TTY (`os.Stderr`).

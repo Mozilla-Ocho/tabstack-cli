@@ -173,11 +173,23 @@ func withCode(code int, err error) error {
 	return &exitErr{code: code, err: err}
 }
 
+// ErrInterrupted is the error a command returns when the user cancelled it.
+// It is exported so main can render it as a plain line rather than fang's red
+// ERROR box: Ctrl-C is the user getting what they asked for, not a failure to
+// announce. It still exits 1, so scripts can tell it from success.
+var ErrInterrupted = errors.New("cancelled")
+
 // classifyError turns a raw error into a coded one. API errors get code 3,
 // everything else gets 1. Usage errors are handled by cobra before we get here.
 func classifyError(err error) error {
 	if err == nil {
 		return nil
+	}
+	// Cancellation reaches here as a wrapped context.Canceled. The only thing
+	// that cancels the root context is the signal handler, so this is Ctrl-C
+	// or SIGTERM rather than an internal abort.
+	if errors.Is(err, context.Canceled) {
+		return withCode(1, ErrInterrupted)
 	}
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) {

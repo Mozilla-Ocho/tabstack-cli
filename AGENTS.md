@@ -156,6 +156,7 @@ argument.
 | `--max-validation-attempts <n>` | no | 1–10 (validated locally). |
 | `--geo <CC>` | no | Geotarget country code. |
 | `--interactive` | no | Allow the task to **pause and request input** mid-run (see `agent input`). |
+| `--max-duration <dur>` | no | Bound the **whole stream**, e.g. `10m`. Unset by default. On expiry: exit `1`. |
 
 Output (`-o json`): NDJSON, one event per line. Event names include `task:started`,
 `agent:processing`, `browser:navigated`, `agent:extracted`, `task:completed`,
@@ -192,6 +193,7 @@ Streams events, then prints a synthesised answer with numbered sources.
 | Flag | Required | Notes |
 |------|----------|-------|
 | `--mode fast\|balanced` | no | `fast` (default): quick answers. `balanced`: deeper multi-source. |
+| `--max-duration <dur>` | no | Bound the **whole stream**, e.g. `2m`. Unset by default. On expiry: exit `1`. |
 | `--fetch-timeout <sec>` | no | Per-page fetch timeout in seconds (integer). |
 | `--no-cache` | no | Force fresh research. |
 
@@ -276,9 +278,15 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
   failure is final.
 - **Retry lines go to stderr and are suppressed under `-o json`** unless
   `--debug` is set, so they never appear in your NDJSON.
-- **`--timeout` does not apply to `automate`/`research`** (a hard timeout would cut
-  the stream). Cancel by killing the process instead. Non-streaming calls default
-  to a 2-minute deadline; pass `--timeout 0` to disable it.
+- **`--timeout` does not apply to `automate`/`research`** (a hard timeout would
+  cut the stream). Non-streaming calls default to a 2-minute deadline; pass
+  `--timeout 0` to disable it. To bound a stream use **`--max-duration`**, which
+  exists for exactly this and exits `1` on expiry naming the elapsed time. In CI
+  always set one, or a stalled run burns the whole job timeout.
+- **`SIGINT` and `SIGTERM` cancel the in-flight request** rather than killing
+  the process, so the server is told to stop. The CLI prints `cancelled` to
+  stderr and exits `1`. That is a plain line, not the usual styled error block,
+  so do not parse it as a failure message.
 - **Irreversible remote actions confirm.** `keys revoke`, `auth logout --all`,
   and `auth sessions --revoke` prompt on a terminal and **exit `2` without one**.
   Always pass `--yes` when driving them non-interactively.

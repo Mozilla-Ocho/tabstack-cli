@@ -400,6 +400,7 @@ func TestWarnUnlikelySchemaIsAdvisoryOnly(t *testing.T) {
 	rootApp.renderer.Err = &errBuf
 
 	cmd := newExtractJSONCmd()
+	cmd.SetContext(context.Background())
 	// A schema that trips the heuristic.
 	if err := cmd.Flags().Set("schema", `{"title":"string"}`); err != nil {
 		t.Fatal(err)
@@ -429,6 +430,7 @@ func TestValidSchemaStaysSilent(t *testing.T) {
 	rootApp.renderer.Err = &errBuf
 
 	cmd := newExtractJSONCmd()
+	cmd.SetContext(context.Background())
 	if err := cmd.Flags().Set("schema", `{"type":"object","properties":{"title":{"type":"string"}}}`); err != nil {
 		t.Fatal(err)
 	}

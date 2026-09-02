@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strconv"
@@ -51,6 +52,7 @@ func setTestAppWithClient(t *testing.T, c *client.Client) *bytes.Buffer {
 func TestExtractMarkdownCmd(t *testing.T) {
 	out := setTestAppWithClient(t, mockClient(200, `{"content":"hello world","url":"https://x"}`))
 	cmd := newExtractMarkdownCmd()
+	cmd.SetContext(context.Background())
 	if err := cmd.RunE(cmd, []string{"https://x"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
@@ -62,6 +64,7 @@ func TestExtractMarkdownCmd(t *testing.T) {
 func TestExtractMarkdownInvalidEffort(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newExtractMarkdownCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("effort", "turbo")
 	if err := cmd.RunE(cmd, []string{"https://x"}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
@@ -71,6 +74,7 @@ func TestExtractMarkdownInvalidEffort(t *testing.T) {
 func TestExtractJSONCmd(t *testing.T) {
 	out := setTestAppWithClient(t, mockClient(200, `{"title":"Result"}`))
 	cmd := newExtractJSONCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("schema", `{"type":"object"}`)
 	if err := cmd.RunE(cmd, []string{"https://x"}); err != nil {
 		t.Fatalf("RunE: %v", err)
@@ -83,6 +87,7 @@ func TestExtractJSONCmd(t *testing.T) {
 func TestExtractJSONMissingSchema(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newExtractJSONCmd()
+	cmd.SetContext(context.Background())
 	if err := cmd.RunE(cmd, []string{"https://x"}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
 	}
@@ -91,6 +96,7 @@ func TestExtractJSONMissingSchema(t *testing.T) {
 func TestExtractJSONAPIError(t *testing.T) {
 	setTestAppWithClient(t, mockClient(400, `{"error":"bad schema"}`))
 	cmd := newExtractJSONCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("schema", `{"type":"object"}`)
 	if err := cmd.RunE(cmd, []string{"https://x"}); codeOf(err) != 3 {
 		t.Errorf("err = %v, want code 3 (API error)", err)
@@ -100,6 +106,7 @@ func TestExtractJSONAPIError(t *testing.T) {
 func TestGenerateJSONCmd(t *testing.T) {
 	out := setTestAppWithClient(t, mockClient(200, `{"summary":"ok"}`))
 	cmd := newGenerateJSONCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("instructions", "summarise this")
 	_ = cmd.Flags().Set("schema", `{"type":"object"}`)
 	if err := cmd.RunE(cmd, []string{"https://x"}); err != nil {
@@ -113,6 +120,7 @@ func TestGenerateJSONCmd(t *testing.T) {
 func TestGenerateJSONMissingInstructions(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newGenerateJSONCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("schema", `{"type":"object"}`)
 	if err := cmd.RunE(cmd, []string{"https://x"}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
@@ -122,6 +130,7 @@ func TestGenerateJSONMissingInstructions(t *testing.T) {
 func TestInputCmd(t *testing.T) {
 	out := setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newInputCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("data", `{"fields":[{"ref":"f1","value":"yes"}]}`)
 	if err := cmd.RunE(cmd, []string{"req-123"}); err != nil {
 		t.Fatalf("RunE: %v", err)
@@ -134,6 +143,7 @@ func TestInputCmd(t *testing.T) {
 func TestInputCmdMissingData(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newInputCmd()
+	cmd.SetContext(context.Background())
 	if err := cmd.RunE(cmd, []string{"req-123"}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
 	}
@@ -142,6 +152,7 @@ func TestInputCmdMissingData(t *testing.T) {
 func TestInputCmdEmptyPayload(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{}`))
 	cmd := newInputCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("data", `{}`) // neither fields nor cancelled
 	if err := cmd.RunE(cmd, []string{"req-123"}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
@@ -151,6 +162,7 @@ func TestInputCmdEmptyPayload(t *testing.T) {
 func TestInputCmdAPIError(t *testing.T) {
 	setTestAppWithClient(t, mockClient(404, `{"error":"no such task"}`))
 	cmd := newInputCmd()
+	cmd.SetContext(context.Background())
 	_ = cmd.Flags().Set("data", `{"cancelled":true}`)
 	if err := cmd.RunE(cmd, []string{"req-123"}); codeOf(err) != 3 {
 		t.Errorf("err = %v, want code 3", err)
@@ -259,6 +271,7 @@ func TestExtractMarkdownRaw(t *testing.T) {
 			rootApp.renderer.Mode = tc.mode
 
 			cmd := newExtractMarkdownCmd()
+			cmd.SetContext(context.Background())
 			if err := cmd.Flags().Set("raw", "true"); err != nil {
 				t.Fatal(err)
 			}
@@ -287,6 +300,7 @@ func TestExtractMarkdownRawRejectsMetadata(t *testing.T) {
 	setTestAppWithClient(t, mockClient(200, `{"content":"x"}`))
 
 	cmd := newExtractMarkdownCmd()
+	cmd.SetContext(context.Background())
 	for _, f := range []string{"raw", "metadata"} {
 		if err := cmd.Flags().Set(f, "true"); err != nil {
 			t.Fatal(err)
@@ -312,6 +326,7 @@ func TestExtractMarkdownRawRejectsMetadata(t *testing.T) {
 func TestExtractMarkdownWithoutRawKeepsEnvelope(t *testing.T) {
 	out := setTestAppWithClient(t, mockClient(200, `{"content":"# Body","url":"https://e"}`))
 	cmd := newExtractMarkdownCmd()
+	cmd.SetContext(context.Background())
 	if err := cmd.RunE(cmd, []string{"https://e"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}

@@ -41,7 +41,7 @@ func newKeysUseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			orgID, err := targetOrg()
+			orgID, err := targetOrg(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -68,7 +68,7 @@ func newKeysCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			orgID, err := targetOrg()
+			orgID, err := targetOrg(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -107,7 +107,7 @@ func newKeysListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			orgID, err := targetOrg()
+			orgID, err := targetOrg(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -231,7 +231,7 @@ func newKeysRevokeCmd() *cobra.Command {
 // given, otherwise the active org. It resolves --org against the server list
 // when possible so a brand new org (not yet in config) can be named, falling
 // back to the local list when the console is unreachable.
-func targetOrg() (string, error) {
+func targetOrg(ctx context.Context) (string, error) {
 	cfg := rootApp.cfg
 	if flagOrg == "" {
 		if cfg.ActiveOrg == "" {
@@ -241,7 +241,7 @@ func targetOrg() (string, error) {
 	}
 
 	c, _ := consoleClient()
-	orgs, err := c.Organizations(context.Background())
+	orgs, err := c.Organizations(ctx)
 	if err != nil {
 		id, localErr := resolveOrgLocal(cfg, flagOrg)
 		if localErr != nil {

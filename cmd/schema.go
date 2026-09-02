@@ -82,7 +82,7 @@ func newSchemaListCmd() *cobra.Command {
 				return printLocalList(pulled)
 			}
 
-			idx, err := schemas.CachedIndex(context.Background(), schemas.NewFetcher(), dir, indexCacheTTL, refresh)
+			idx, err := schemas.CachedIndex(cmd.Context(), schemas.NewFetcher(), dir, indexCacheTTL, refresh)
 			if err != nil {
 				return classifyError(err)
 			}
@@ -133,7 +133,7 @@ func newSchemaPullCmd() *cobra.Command {
 				return withCode(1, err)
 			}
 
-			ctx := context.Background()
+			ctx := cmd.Context()
 			fetcher := schemas.NewFetcher()
 
 			idx, err := schemas.CachedIndex(ctx, fetcher, dir, indexCacheTTL, refresh)
@@ -179,7 +179,7 @@ func newSchemaStatusCmd() *cobra.Command {
 			if err != nil {
 				return withCode(1, err)
 			}
-			return runStatus(context.Background(), dir, local)
+			return runStatus(cmd.Context(), dir, local)
 		},
 	}
 

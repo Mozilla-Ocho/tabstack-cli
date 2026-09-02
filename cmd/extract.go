@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 
 	"github.com/spf13/cobra"
@@ -58,7 +57,7 @@ func newExtractMarkdownCmd() *cobra.Command {
 				NoCache:   nocache,
 			}
 
-			resp, err := rootApp.client.ExtractMarkdown(context.Background(), req)
+			resp, err := rootApp.client.ExtractMarkdown(cmd.Context(), req)
 			if err != nil {
 				return classifyError(err)
 			}
@@ -120,7 +119,7 @@ func newExtractJSONCmd() *cobra.Command {
 				NoCache:    nocache,
 			}
 
-			out, err := rootApp.client.ExtractJSON(context.Background(), req)
+			out, err := rootApp.client.ExtractJSON(cmd.Context(), req)
 			if err != nil {
 				return classifyError(err)
 			}

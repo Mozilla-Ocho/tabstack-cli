@@ -128,6 +128,10 @@ func runLogin(ctx context.Context, mode keySetupMode, orgHint string) error {
 		// Shutdown (not Close) so an in-flight response finishes writing; Close
 		// can tear the connection down mid-write and the browser gets a reset
 		// instead of the page.
+		// Deliberately not derived from the command context: on the failure path
+		// the user may already have hit Ctrl-C, and this shutdown is what flushes
+		// the callback page to the browser. Inheriting the cancellation would
+		// reset the connection instead of showing the page.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)

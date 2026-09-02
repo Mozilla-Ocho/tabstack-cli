@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -179,6 +181,7 @@ func newAutomateCmd() *cobra.Command {
 		maxValidation int
 		geo           string
 		interactive   bool
+		maxDuration   time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -228,11 +231,15 @@ func newAutomateCmd() *cobra.Command {
 				req.Data = raw
 			}
 
+			ctx, cancel := streamContext(cmd.Context(), maxDuration)
+			defer cancel()
+
+			start := time.Now()
 			res, err := runStream(func(fn func(client.Event) error) error {
-				return rootApp.client.Automate(context.Background(), req, fn)
+				return rootApp.client.Automate(ctx, req, fn)
 			})
 			if err != nil {
-				return classifyError(err)
+				return classifyStreamError(cmd.Context(), err, maxDuration, time.Since(start))
 			}
 
 			rootApp.renderer.PrintFinalAnswer(res.finalAnswer)
@@ -252,6 +259,7 @@ func newAutomateCmd() *cobra.Command {
 	f.IntVar(&maxValidation, "max-validation-attempts", 0, "maximum validation attempts (1-10)")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&interactive, "interactive", false, "allow the task to pause and request input (answer with `agent input`)")
+	f.DurationVar(&maxDuration, "max-duration", 0, maxDurationHelp)
 
 	return cmd
 }
@@ -261,6 +269,7 @@ func newResearchCmd() *cobra.Command {
 		mode         string
 		fetchTimeout int
 		nocache      bool
+		maxDuration  time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -285,11 +294,15 @@ func newResearchCmd() *cobra.Command {
 				NoCache:      nocache,
 			}
 
+			ctx, cancel := streamContext(cmd.Context(), maxDuration)
+			defer cancel()
+
+			start := time.Now()
 			res, err := runStream(func(fn func(client.Event) error) error {
-				return rootApp.client.Research(context.Background(), req, fn)
+				return rootApp.client.Research(ctx, req, fn)
 			})
 			if err != nil {
-				return classifyError(err)
+				return classifyStreamError(cmd.Context(), err, maxDuration, time.Since(start))
 			}
 
 			rootApp.renderer.PrintFinalAnswer(res.finalAnswer)
@@ -306,6 +319,7 @@ func newResearchCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("mode", fixedCompletions("fast", "balanced"))
 	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "fetch timeout per page, in seconds")
 	addNoCacheFlag(f, &nocache)
+	f.DurationVar(&maxDuration, "max-duration", 0, maxDurationHelp)
 
 	return cmd
 }
@@ -343,7 +357,7 @@ func newInputCmd() *cobra.Command {
 				))
 			}
 
-			if err := rootApp.client.AutomateInput(context.Background(), args[0], req); err != nil {
+			if err := rootApp.client.AutomateInput(cmd.Context(), args[0], req); err != nil {
 				return classifyError(err)
 			}
 
@@ -368,4 +382,39 @@ func failureError(kind, msg string) error {
 		return fmt.Errorf("%s failed: %s", kind, msg)
 	}
 	return fmt.Errorf("%s reported failure", kind)
+}
+
+// maxDurationHelp is shared by automate and research. The overlap with
+// --timeout is the confusing part, so both flags say what the other does.
+const maxDurationHelp = "stop the whole stream after this long, e.g. 10m (unlike --timeout, which bounds non-streaming calls only)"
+
+// streamContext derives the context a streaming command runs under. With
+// --max-duration set it carries a deadline; without one it is the root context
+// unchanged, so a long task is bounded only by the signal handler.
+func streamContext(parent context.Context, maxDuration time.Duration) (context.Context, context.CancelFunc) {
+	if maxDuration <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, maxDuration)
+}
+
+// classifyStreamError maps how a stream ended onto an exit code.
+//
+// Cancellation and expiry both surface as context errors, so they are told
+// apart by which context ended: the signal handler cancels the parent, while
+// --max-duration expires only the derived one. Both exit 1, but only expiry is
+// a real failure worth explaining, so it names the flag and the elapsed time.
+func classifyStreamError(parent context.Context, err error, maxDuration, elapsed time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	if parent.Err() != nil {
+		return withCode(1, ErrInterrupted)
+	}
+	if maxDuration > 0 && errors.Is(err, context.DeadlineExceeded) {
+		return withCode(1, fmt.Errorf(
+			"stopped after %s: the --max-duration limit of %s was reached",
+			elapsed.Round(time.Second), maxDuration))
+	}
+	return classifyError(err)
 }

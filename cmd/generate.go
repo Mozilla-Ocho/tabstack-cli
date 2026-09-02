@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -87,7 +86,7 @@ func newGenerateJSONCmd() *cobra.Command {
 				NoCache:      nocache,
 			}
 
-			out, err := rootApp.client.GenerateJSON(context.Background(), req)
+			out, err := rootApp.client.GenerateJSON(cmd.Context(), req)
 			if err != nil {
 				return classifyError(err)
 			}

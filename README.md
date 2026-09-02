@@ -468,6 +468,7 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
 | `--timeout <dur>` | Request timeout for non-streaming calls (default `2m`); `0` disables |
 | `--retries <n>` | Retry transient failures this many times (default `2`); `0` disables |
+| `--max-duration <dur>` | Bound a whole stream (`agent automate`, `agent research`); unset by default |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
 
 Failures carry their own diagnostics. An exit-3 error keeps the
@@ -477,6 +478,33 @@ organisation scoping, and `429` reports `Retry-After` when the server sent one.
 When the response carried an `x-trace-id`, the error ends with
 `(trace id <id>)`, so the id to quote in a support request is on the failure
 itself rather than only under `--debug`.
+
+### Cancelling, and bounding a long run
+
+Ctrl-C (or `SIGTERM`) cancels the request in flight rather than killing the
+process mid-call, so the server is told to stop. The CLI prints `cancelled` to
+stderr and exits `1`.
+
+Streaming commands can also be bounded up front:
+
+```bash
+tabstack agent automate "$task" --url "$url" --max-duration 10m
+tabstack agent research "$query" --max-duration 2m
+```
+
+On expiry the command reports the elapsed time and the flag that stopped it,
+and exits `1`. This matters most in CI, where a stalled run would otherwise
+burn the entire job timeout.
+
+`--max-duration` and `--timeout` are different things and do not overlap:
+
+| Flag | Applies to | Bounds |
+|---|---|---|
+| `--timeout` | `extract`, `generate`, `agent input` | one non-streaming request, default `2m` |
+| `--max-duration` | `agent automate`, `agent research` | the whole stream, unset by default |
+
+A hard `--timeout` on a stream would cut it off mid-flight, which is why it has
+never applied there.
 
 ### Retries
 

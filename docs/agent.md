@@ -5,9 +5,14 @@ Long-running AI tasks that stream their progress. Both `automate` and
 arrives and the final answer at the end.
 
 Because a hard deadline would cut a stream mid-flight, **`--timeout` does not
-apply to these two**. Cancel with Ctrl-C instead; cancellation flows through
-the request context. `agent input` is an ordinary request/response call, so
-`--timeout` does apply to it.
+apply to these two**. To bound a stream use **`--max-duration`**, which stops
+the whole run and exits `1` naming the elapsed time and the flag. `agent input`
+is an ordinary request/response call, so `--timeout` applies to it and
+`--max-duration` does not exist there.
+
+Ctrl-C (or `SIGTERM`) cancels the request in flight, so the server is told to
+stop rather than the process being killed mid-call. The CLI prints `cancelled`
+to stderr and exits `1`.
 
 Failure is signalled **in-band**, not by HTTP status: a `task:completed` event
 carrying `success:false`, or an `error` event. Both map to exit code `3`, so
@@ -44,6 +49,7 @@ Runs a browser-automation task described in natural language, server-side.
 | `--max-iterations <n>` | cap on task iterations, 1 to 100, checked locally |
 | `--max-validation-attempts <n>` | cap on validation attempts, 1 to 10, checked locally |
 | `--geo <CC>` | run via an exit node in this country |
+| `--max-duration <dur>` | stop the whole stream after this long, e.g. `10m`; unset by default |
 
 ### Examples
 
@@ -98,6 +104,7 @@ citations.
 | `--mode fast\|balanced` | `fast` (default) for quick answers, `balanced` for deeper multi-source work |
 | `--fetch-timeout <n>` | per-page fetch timeout, in seconds |
 | `--no-cache` | skip the cache and research fresh |
+| `--max-duration <dur>` | stop the whole stream after this long, e.g. `2m`; unset by default |
 
 ### Examples
 

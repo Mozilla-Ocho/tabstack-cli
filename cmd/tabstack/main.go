@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image/color"
+	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	// fang renders with lipgloss v2; the v1 module (charmbracelet/lipgloss) is
 	// used separately by internal/ui for command output.
@@ -65,17 +69,35 @@ type coded interface {
 	Code() int
 }
 
+// errorHandler renders command failures. Cancellation is special-cased: the
+// user pressed Ctrl-C, so a red ERROR box announcing what they just asked for
+// is theatre. Everything else goes through fang's default rendering.
+func errorHandler(w io.Writer, styles fang.Styles, err error) {
+	if errors.Is(err, cmd.ErrInterrupted) {
+		_, _ = fmt.Fprintln(w, "cancelled")
+		return
+	}
+	fang.DefaultErrorHandler(w, styles, err)
+}
+
 func main() {
 	root := cmd.NewRootCmd()
+
+	// One signal handler for the whole tree. Every command threads this
+	// context down to its request, so Ctrl-C cancels the call in flight and
+	// the server is told, rather than the process being killed mid-request.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// fang runs the command tree with styled help, errors, and version output.
 	// It prints any error itself (styled, to stderr) and returns it, so we keep
 	// owning the exit-code mapping that makes this CLI scriptable.
 	if err := fang.Execute(
-		context.Background(),
+		ctx,
 		root,
 		fang.WithVersion(cmd.Version()),
 		fang.WithColorSchemeFunc(brandScheme),
+		fang.WithErrorHandler(errorHandler),
 	); err != nil {
 		if c, ok := errors.AsType[coded](err); ok {
 			os.Exit(c.Code())
