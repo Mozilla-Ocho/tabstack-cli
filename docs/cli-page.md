@@ -286,6 +286,36 @@ tabstack completion fish > ~/.config/fish/completions/tabstack.fish
 Completion covers subcommands, enum flag values, your organisations, and both
 the schema library and your local store.
 
+## Man page
+
+```bash
+sudo mkdir -p /usr/local/share/man/man1
+tabstack man | sudo tee /usr/local/share/man/man1/tabstack.1 > /dev/null
+man tabstack
+```
+
+## Uninstalling
+
+Revoke your credentials first: deleting the local files removes your copy of a
+key, not the key itself, which stays valid until revoked.
+
+```bash
+tabstack keys list                 # find the id this CLI stores
+tabstack keys revoke <key-id>
+tabstack auth logout               # or --all for every session
+```
+
+Then the binary and the configuration:
+
+```bash
+sudo rm /usr/local/bin/tabstack               # or "$(go env GOPATH)/bin/tabstack"
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/tabstack"
+```
+
+That directory holds `config.toml` and the schema store; nothing is written
+anywhere else. Remove any completion script or man page you installed by hand,
+and leave a repository's `.tabstack.toml` alone.
+
 ## Driving the CLI from an AI agent
 
 See [AGENTS.md](https://github.com/Mozilla-Ocho/tabstack-cli/blob/main/AGENTS.md)

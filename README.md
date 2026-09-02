@@ -36,6 +36,8 @@ This domain is for use in illustrative examples in documents...
 - [Command reference](docs/README.md)
 - [Common options](#common-options)
 - [Shell completion](#shell-completion)
+- [Man page](#man-page)
+- [Uninstalling](#uninstalling)
 - [Output & scripting](#output--scripting)
 - [Exit codes](#exit-codes)
 - [Using tabstack with AI agents](#using-tabstack-with-ai-agents)
@@ -710,6 +712,26 @@ tabstack completion powershell | Out-String | Invoke-Expression
 Add that line to your profile to make it permanent. Run
 `tabstack completion <shell> --help` for the per-shell notes.
 
+## Man page
+
+`tabstack man` writes a roff man page to stdout. Install it where your system
+looks:
+
+```bash
+# macOS and most Linux distributions
+sudo mkdir -p /usr/local/share/man/man1
+tabstack man | sudo tee /usr/local/share/man/man1/tabstack.1 > /dev/null
+man tabstack
+```
+
+For a user-local install with no `sudo`:
+
+```bash
+mkdir -p ~/.local/share/man/man1
+tabstack man > ~/.local/share/man/man1/tabstack.1
+man tabstack   # add ~/.local/share/man to MANPATH if your system does not search it
+```
+
 ## Output & scripting
 
 Output is **pretty** (styled, human-readable) on a terminal and **JSON** when
@@ -816,6 +838,47 @@ fi
 wiring it into an agent (Claude Code, a custom harness, etc.), point the agent at
 [AGENTS.md](AGENTS.md). It documents every command, flag, and exit code in a
 form tuned for machine consumption.
+
+## Uninstalling
+
+**Revoke your credentials first.** Deleting the local files removes your copy
+of a key, not the key itself: it stays valid server-side until revoked.
+
+```bash
+tabstack keys list                 # note the id of the key this CLI stores
+tabstack keys revoke <key-id>      # revoke it server-side
+tabstack auth logout               # or --all to end every session
+```
+
+Then remove the binary, matching how you installed it:
+
+```bash
+sudo rm /usr/local/bin/tabstack    # install.sh, or `make install-local`
+rm "$(go env GOPATH)/bin/tabstack" # go install
+```
+
+Then the configuration and schema store, which live in one directory:
+
+```bash
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/tabstack"
+```
+
+That directory holds `config.toml` (your session and any stored API keys) and
+`schemas/` (pulled schemas plus their manifest and index cache). Nothing is
+written anywhere else.
+
+Finally, anything you installed by hand from the sections above:
+
+```bash
+rm -f ~/.local/share/bash-completion/completions/tabstack
+rm -f /etc/bash_completion.d/tabstack
+rm -f "${fpath[1]}/_tabstack"                       # zsh
+rm -f ~/.config/fish/completions/tabstack.fish
+sudo rm -f /usr/local/share/man/man1/tabstack.1
+rm -f ~/.local/share/man/man1/tabstack.1
+```
+
+A project `.tabstack.toml` belongs to its repository, so leave it be.
 
 ## Getting help, and reporting bugs
 
