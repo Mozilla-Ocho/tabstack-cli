@@ -155,6 +155,14 @@ The codes are documented public behaviour, so **every usage error carries code 2
 
 `cmd/auth.go`'s `classifyConsoleError` is the auth-host counterpart: an expired or missing session is a configuration problem (2), a rejected management request is an API error (`console.APIError`, 3), anything else falls through to `classifyError`.
 
+### Support surfaces
+
+`RepoURL`/`IssuesURL`/`DocsURL` (`cmd/helpers.go`) back both the root help's HELP AND SUPPORT block and the bug-report footer, so the two cannot drift.
+
+`IsLikelyBug` gates that footer and the bar is deliberately high: only an exit-1 failure that is **not** cancellation, a deadline, or a `net.Error` qualifies. A footer on every dropped connection teaches people to ignore it, which costs the reports worth having. `*url.Error` and `*net.OpError` both satisfy `net.Error`, so one `errors.As` covers the HTTP stack.
+
+`redactedCommandLine` strips `--api-key`/`--key` values in both the spaced and `=` forms. This is the one place the CLI invites someone to paste their command line into a public issue, so it is the one place a secret must not survive; `TestRedactedCommandLineHidesSecrets` covers all four spellings.
+
 ### Output modes
 
 `resolveMode` (root.go): `--output pretty|json` wins; otherwise **pretty on a TTY, JSON when piped**, so `tabstack ... | jq` works without a flag. JSON streams emit NDJSON (one line per event). The renderer never reshapes caller-defined schema results.

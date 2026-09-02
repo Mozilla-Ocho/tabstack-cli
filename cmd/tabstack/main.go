@@ -77,6 +77,12 @@ func errorHandler(w io.Writer, styles fang.Styles, err error) {
 		return
 	}
 	fang.DefaultErrorHandler(w, styles, err)
+
+	// Only for failures we cannot explain. A footer on every dropped
+	// connection would train people to skip it.
+	if cmd.IsLikelyBug(err) {
+		_, _ = fmt.Fprint(w, cmd.BugReportHint())
+	}
 }
 
 func main() {

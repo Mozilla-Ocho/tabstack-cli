@@ -7,6 +7,9 @@ The same material is in `tabstack <command> --help`; these pages exist so you
 can read across commands, link to a specific one, and see the JSON shapes
 written down rather than inferred from a sample.
 
+The hosted documentation lives at <https://docs.tabstack.ai>. These pages track
+the code in this repository, so where the two disagree, these are current.
+
 | Page | Commands | Talks to |
 |---|---|---|
 | [extract](extract.md) | `extract markdown`, `extract json` | product API |

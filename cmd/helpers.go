@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -622,4 +623,96 @@ func warnWriter() io.Writer {
 		return io.Discard
 	}
 	return rootApp.renderer.Err
+}
+
+// Support surfaces. Kept here rather than inlined so the help text, the
+// bug-report footer, and the docs cannot drift apart.
+const (
+	// RepoURL is the source repository.
+	RepoURL = "https://github.com/Mozilla-Ocho/tabstack-cli"
+	// IssuesURL is where a bug goes.
+	IssuesURL = RepoURL + "/issues"
+	// DocsURL is the web documentation.
+	DocsURL = "https://docs.tabstack.ai"
+)
+
+// IsLikelyBug reports whether an error looks like a defect in tabstack rather
+// than something the user, the network, or the API did.
+//
+// It gates the bug-report footer, so the bar is deliberately high. Telling
+// someone to file an issue because their wifi dropped, or because they pressed
+// Ctrl-C, teaches them to ignore the message, which costs the reports that
+// actually matter. Only unexplained exit-1 failures qualify: usage errors (2)
+// and API rejections (3) are understood conditions, and cancellation,
+// deadlines, and transport failures are all expected.
+func IsLikelyBug(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Anything already classified as usage or API is not a defect.
+	var coded *exitErr
+	if errors.As(err, &coded) && coded.Code() != 1 {
+		return false
+	}
+
+	switch {
+	case errors.Is(err, ErrInterrupted),
+		errors.Is(err, context.Canceled),
+		errors.Is(err, context.DeadlineExceeded):
+		return false
+	case isTimeoutError(err):
+		return false
+	}
+
+	// Transport failures: connection refused, DNS, TLS, resets. *url.Error and
+	// *net.OpError both satisfy net.Error, so one check covers the HTTP stack.
+	var netErr net.Error
+	return !errors.As(err, &netErr)
+}
+
+// BugReportHint is the footer shown after an unexplained failure. clig.dev asks
+// for debug information and reporting instructions, and for reporting to be
+// effortless, so this hands over everything a triager needs in one paste.
+func BugReportHint() string {
+	var b strings.Builder
+	b.WriteString("\nThis looks like a bug in tabstack rather than something you did.\n")
+	fmt.Fprintf(&b, "Report it at %s/new and include:\n\n", IssuesURL)
+	fmt.Fprintf(&b, "  tabstack %s\n", version)
+	fmt.Fprintf(&b, "  %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&b, "  %s\n\n", redactedCommandLine())
+	b.WriteString("Re-run with --debug to capture the request id and timing.\n")
+	return b.String()
+}
+
+// redactedCommandLine renders the invocation for pasting into a bug report,
+// with credential values removed.
+//
+// This matters: os.Args carries whatever was typed, so echoing it verbatim
+// would invite users to paste a live API key into a public issue. The one
+// place we ask someone to share their command line is the one place a secret
+// must not survive.
+func redactedCommandLine() string {
+	secretFlags := map[string]bool{"--api-key": true, "--key": true}
+
+	args := make([]string, 0, len(os.Args))
+	args = append(args, "tabstack")
+	redactNext := false
+	for _, a := range os.Args[1:] {
+		switch {
+		case redactNext:
+			args = append(args, "REDACTED")
+			redactNext = false
+		case secretFlags[a]:
+			args = append(args, a)
+			redactNext = true
+		default:
+			if name, _, ok := strings.Cut(a, "="); ok && secretFlags[name] {
+				args = append(args, name+"=REDACTED")
+				continue
+			}
+			args = append(args, a)
+		}
+	}
+	return strings.Join(args, " ")
 }

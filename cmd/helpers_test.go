@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -551,6 +554,113 @@ func TestBlankGeoMeansUnset(t *testing.T) {
 		}
 		if got := geoTarget(blank); got != nil {
 			t.Errorf("geoTarget(%q) = %+v, want nil so the field is omitted", blank, got)
+		}
+	}
+}
+
+// TestIsLikelyBug guards the bar for showing the bug-report footer. The
+// "not a bug" rows matter most: a footer on every dropped connection teaches
+// people to ignore it, which costs the reports that are worth having.
+func TestIsLikelyBug(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close() // closed, so a request to it fails at the transport
+	_, refused := http.Get(srv.URL)
+	if refused == nil {
+		t.Skip("expected the closed server to refuse")
+	}
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"cancellation", ErrInterrupted, false},
+		{"wrapped cancellation", fmt.Errorf("stream: %w", ErrInterrupted), false},
+		{"context cancelled", context.Canceled, false},
+		{"deadline exceeded", context.DeadlineExceeded, false},
+		{"usage error", withCode(2, errors.New("missing <url>")), false},
+		{"api error", withCode(3, &client.APIError{StatusCode: 404}), false},
+		{"connection refused", refused, false},
+		{"wrapped transport failure", fmt.Errorf("fetch: %w", refused), false},
+
+		{"an unexplained failure", errors.New("decode response: unexpected token"), true},
+		{"an unexplained failure coded 1", withCode(1, errors.New("boom")), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsLikelyBug(tc.err); got != tc.want {
+				t.Errorf("IsLikelyBug(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactedCommandLineHidesSecrets is the security-relevant one. The footer
+// asks the user to paste their command into a public issue, so a live key must
+// not survive that round trip.
+func TestRedactedCommandLineHidesSecrets(t *testing.T) {
+	const secret = "sk-live-do-not-leak"
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"separate value", []string{"tabstack", "extract", "markdown", "https://a.com", "--api-key", secret}},
+		{"equals form", []string{"tabstack", "extract", "markdown", "https://a.com", "--api-key=" + secret}},
+		{"the --key alias", []string{"tabstack", "extract", "markdown", "https://a.com", "--key", secret}},
+		{"equals form of the alias", []string{"tabstack", "extract", "markdown", "--key=" + secret}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := os.Args
+			os.Args = tc.args
+			t.Cleanup(func() { os.Args = prev })
+
+			got := redactedCommandLine()
+			if strings.Contains(got, secret) {
+				t.Errorf("the key survived redaction: %q", got)
+			}
+			if !strings.Contains(got, "REDACTED") {
+				t.Errorf("nothing was redacted: %q", got)
+			}
+			// The rest of the command must survive, or the report is useless.
+			if !strings.Contains(got, "extract markdown") {
+				t.Errorf("the command was lost: %q", got)
+			}
+		})
+	}
+
+	t.Run("a command with no secret is unchanged", func(t *testing.T) {
+		prev := os.Args
+		os.Args = []string{"tabstack", "extract", "markdown", "https://a.com", "--raw"}
+		t.Cleanup(func() { os.Args = prev })
+
+		got := redactedCommandLine()
+		if got != "tabstack extract markdown https://a.com --raw" {
+			t.Errorf("got %q", got)
+		}
+	})
+}
+
+// TestBugReportHintCarriesTriageDetail: the footer exists to make reporting
+// effortless, so it has to contain what a triager needs.
+func TestBugReportHintCarriesTriageDetail(t *testing.T) {
+	prev := os.Args
+	os.Args = []string{"tabstack", "extract", "markdown", "https://a.com"}
+	t.Cleanup(func() { os.Args = prev })
+
+	got := BugReportHint()
+	for _, want := range []string{
+		IssuesURL,
+		runtime.GOOS,
+		"extract markdown",
+		"--debug",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("hint missing %q:\n%s", want, got)
 		}
 	}
 }

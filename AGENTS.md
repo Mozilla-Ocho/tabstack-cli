@@ -377,6 +377,12 @@ Quote the trace id in a support request. It is now on the failure itself, so
 
 Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
 
+An exit `1` that the CLI cannot attribute to the network, a timeout, or
+cancellation prints a bug-report footer to stderr, carrying the version,
+platform, and the command with credentials redacted. Understood failures
+(usage, API rejection, refused connection, Ctrl-C) never print it, so its
+presence is a real signal that something is broken.
+
 Exit `2` is exhaustive for usage mistakes: every one carries the code on the
 error itself rather than being recognised from its wording, so it does not
 drift between releases. Branch on the code, never on the message.

@@ -14,6 +14,8 @@ It turns any URL into clean Markdown or schema-shaped JSON, runs natural-languag
 browser automation, and answers research questions with cited sources, all with
 output that's pretty in a terminal and pipeable into `jq`.
 
+**Docs:** <https://docs.tabstack.ai> · **Command reference:** [`docs/`](docs/README.md) · **Issues:** [report a bug](https://github.com/Mozilla-Ocho/tabstack-cli/issues/new)
+
 ```console
 $ tabstack extract markdown https://example.com --metadata
 Example Domain
@@ -37,6 +39,7 @@ This domain is for use in illustrative examples in documents...
 - [Output & scripting](#output--scripting)
 - [Exit codes](#exit-codes)
 - [Using tabstack with AI agents](#using-tabstack-with-ai-agents)
+- [Getting help, and reporting bugs](#getting-help-and-reporting-bugs)
 - [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
@@ -770,6 +773,25 @@ fi
 wiring it into an agent (Claude Code, a custom harness, etc.), point the agent at
 [AGENTS.md](AGENTS.md). It documents every command, flag, and exit code in a
 form tuned for machine consumption.
+
+## Getting help, and reporting bugs
+
+`tabstack --help` carries the links; the short version:
+
+| | |
+|---|---|
+| Docs | <https://docs.tabstack.ai> |
+| Source | <https://github.com/Mozilla-Ocho/tabstack-cli> |
+| Report a bug | <https://github.com/Mozilla-Ocho/tabstack-cli/issues/new> |
+| Report a vulnerability | see [SECURITY.md](SECURITY.md), **not** a public issue |
+| Man page | `tabstack man` |
+
+When a command fails in a way the CLI cannot explain, it prints what a bug
+report needs: the version, your platform, and the command you ran with any
+credential removed. Re-run with `--debug` to add the request id and timing.
+
+Failures the CLI *can* explain do not print that footer, so a refused
+connection or a rejected request stays quiet.
 
 ## Development
 
