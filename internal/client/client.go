@@ -20,6 +20,7 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	timeout time.Duration
 }
 
 // Option configures a Client.
@@ -30,11 +31,14 @@ func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
 }
 
-// WithTimeout sets a request timeout on the default http.Client. Note that for
-// streaming endpoints a hard timeout will cut the stream off, so the streaming
-// methods build their own request context rather than relying on this.
+// WithTimeout sets the per-request timeout for non-streaming calls. It is
+// deliberately not an http.Client.Timeout: that covers reading the response
+// body too, so it would cut a long-lived SSE stream off mid-flight. Instead the
+// duration is stored here and doJSON alone applies it to its request context,
+// leaving doStream genuinely untimed. Keeping it off the http.Client also means
+// this composes with WithHTTPClient and WithDebug in any order.
 func WithTimeout(d time.Duration) Option {
-	return func(c *Client) { c.http.Timeout = d }
+	return func(c *Client) { c.timeout = d }
 }
 
 // New constructs a Client. baseURL should not carry a trailing slash; we
@@ -86,8 +90,15 @@ func (c *Client) newRequest(ctx context.Context, path string, body any) (*http.R
 }
 
 // doJSON sends a request expecting a single JSON response, decoding it into out.
-// It is used by the non-streaming endpoints (extract, generate, input).
+// It is used by the non-streaming endpoints (extract, generate, input), and is
+// the only place the configured timeout applies: see WithTimeout.
 func (c *Client) doJSON(ctx context.Context, path string, body, out any) error {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	req, err := c.newRequest(ctx, path, body)
 	if err != nil {
 		return err
@@ -115,7 +126,7 @@ func (c *Client) doJSON(ctx context.Context, path string, body, out any) error {
 }
 
 // doStream sends a request expecting an SSE stream, invoking fn for each event.
-// It does not impose a client-level timeout, cancellation flows through ctx.
+// It never applies the configured timeout, cancellation flows through ctx.
 func (c *Client) doStream(ctx context.Context, path string, body any, fn func(Event) error) error {
 	req, err := c.newRequest(ctx, path, body)
 	if err != nil {

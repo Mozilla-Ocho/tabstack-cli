@@ -21,8 +21,71 @@ func TestNewTrimsTrailingSlash(t *testing.T) {
 
 func TestWithTimeout(t *testing.T) {
 	c := New("k", "https://x", WithTimeout(5*time.Second))
-	if c.http.Timeout != 5*time.Second {
-		t.Errorf("Timeout = %v", c.http.Timeout)
+	if c.timeout != 5*time.Second {
+		t.Errorf("timeout = %v, want 5s", c.timeout)
+	}
+	// The timeout must not land on the http.Client: that would cover reading
+	// the response body and so cut SSE streams off. See TestTimeoutSpares...
+	if c.http.Timeout != 0 {
+		t.Errorf("http.Client.Timeout = %v, want 0 (would cut streams)", c.http.Timeout)
+	}
+}
+
+// TestTimeoutAppliesToJSON checks the configured timeout actually bounds a
+// non-streaming call whose server is slower than the deadline.
+func TestTimeoutAppliesToJSON(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := New("k", srv.URL, WithTimeout(50*time.Millisecond))
+	var out map[string]any
+	err := c.doJSON(context.Background(), "/slow", nil, &out)
+	if err == nil {
+		t.Fatal("doJSON succeeded, want a timeout error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestTimeoutSparesStreams is the regression test for the bug this replaces:
+// WithTimeout used to set http.Client.Timeout, which bounds the whole exchange
+// including the body, so `--timeout 30s` silently killed every SSE stream at
+// 30s. A stream that dribbles events past the deadline must still complete.
+func TestTimeoutSparesStreams(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for range 3 {
+			_, _ = io.WriteString(w, "event: tick\ndata: {\"n\":1}\n\n")
+			flusher.Flush()
+			time.Sleep(30 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	// A timeout far shorter than the stream's total lifetime.
+	c := New("k", srv.URL, WithTimeout(20*time.Millisecond))
+	var events int
+	err := c.doStream(context.Background(), "/stream", nil, func(Event) error {
+		events++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("doStream returned %v, want the stream to outlive the timeout", err)
+	}
+	if events != 3 {
+		t.Errorf("got %d events, want 3", events)
 	}
 }
 
