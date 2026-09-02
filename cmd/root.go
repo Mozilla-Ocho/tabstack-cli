@@ -54,6 +54,7 @@ var (
 	flagNoColor bool
 	flagTimeout time.Duration
 	flagDebug   bool
+	flagRetries int
 )
 
 // rootApp holds the constructed context for the current invocation.
@@ -175,6 +176,7 @@ func addProductFlags(cmd *cobra.Command) {
 	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API (overrides env and stored keys)")
 	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
 	pf.DurationVar(&flagTimeout, "timeout", defaultTimeout, "request timeout for non-streaming calls; 0 disables (e.g. 30s)")
+	pf.IntVar(&flagRetries, "retries", client.DefaultRetries, "retry transient failures (408, 409, 429, 5xx) this many times; 0 disables")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
@@ -262,6 +264,10 @@ func setupApp() error {
 	var opts []client.Option
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
+	}
+	opts = append(opts, client.WithRetries(flagRetries))
+	if sink := retrySink(base.renderer, flagDebug); sink != nil {
+		opts = append(opts, client.WithRetryNotify(sink))
 	}
 	if flagDebug {
 		opts = append(opts, client.WithDebug(debugSink(base.renderer, nil)))

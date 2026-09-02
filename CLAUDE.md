@@ -74,6 +74,16 @@ The client splits on transport, not endpoint:
 
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
 
+### Retries
+
+`internal/client/retry.go` holds the policy; `doJSON` and `doStream` hold the loops. Retryable statuses are 408, 409, 429, and 5xx, matching the SDKs: everything else means the request itself is wrong and replaying it cannot help. Backoff is exponential with **full jitter**, which matters because several CLI invocations in one CI job hit the same rate limit simultaneously and a fixed schedule would have them collide again. `Retry-After` beats the computed backoff (the server knows when it will be ready) but is capped at `maxRetryAfter` so a hostile or mistaken value cannot stall a build.
+
+Two invariants. The `--timeout` deadline wraps the **whole retry loop**, not each attempt, so backoff can never extend it; and `sleepFor` selects on the context, so cancellation ends the wait immediately. Requests are rebuilt per attempt because `newRequest` marshals from the body value: reusing one `*http.Request` would send an already-drained reader on the second try (`TestRetryBodyIsReplayed`).
+
+**`doStream` retries establishment only.** A non-2xx or transport failure arrives before any event, so replaying is safe and is the same transient case. Once the server answers 2xx the loop is over for good: the task is running, events may already have reached `fn`, and a partial stream cannot be replayed without duplicating what the caller has seen or dropping what it has not. The protocol offers no resume cursor. `TestStreamRetriesEstablishmentOnly` pins all three branches.
+
+`client.WithRetryNotify` takes a plain `func(RetryInfo)` so the client package keeps no `ui` dependency, mirroring `WithDebug`. `cmd/debug.go`'s `retrySink` renders it, and **returns nil under `--output json` without `--debug`**, so the client is not even asked to report and machine-facing stderr stays as quiet as before.
+
 ### Debug flag
 
 `--debug` (root, persistent) surfaces per-call diagnostics. `client.WithDebug(sink)` (`internal/client/debug.go`) wraps the http transport with a `debugTransport` that times each `RoundTrip` (request → response headers, i.e. server latency / time-to-first-byte, which is also the only meaningful timing for a long-lived stream) and reads the `x-trace-id` and `x-ratelimit-*` response headers into a `DebugInfo`. It composes over `WithHTTPClient`/`WithTimeout` and touches no bodies or credentials. `cmd/debug.go`'s `debugSink` renders each `DebugInfo` to **stderr** (never stdout, so piping and NDJSON stay clean): a compact line in pretty mode, a JSON object under `--output json`. Only product-host calls are instrumented; the `client` package stays free of any `ui` dependency (the sink is a plain `func(DebugInfo)`).

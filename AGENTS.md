@@ -45,6 +45,7 @@ registered on the commands that read them, so passing one elsewhere is an
 | `--auth-url <url>` | `auth`, `keys`, `config`, `mcp` | Console root, overrides env + config. |
 | `--org <selector>` | `extract`, `generate`, `agent`, `keys`, `auth login` | Act as another org for one command. |
 | `--timeout <dur>` | `extract`, `generate`, `agent`, `mcp` | Timeout for **non-streaming** calls only, e.g. `30s`. Defaults to `2m`; `0` disables. Never applies to `automate`/`research`. |
+| `--retries <n>` | `extract`, `generate`, `agent`, `mcp` | Retry 408/409/429/5xx this many times. Defaults to `2`; `0` disables. Bounded by `--timeout`. |
 | `--debug` | everything | Request id, timing, rate limits, to stderr. Only product-host calls are instrumented. |
 
 **Every command emits JSON under `-o json`**, including `auth`, `keys`,
@@ -234,7 +235,7 @@ most expensive.
 | Code | Meaning | Agent action |
 |------|---------|--------------|
 | `0` | success | proceed |
-| `1` | runtime / network error | retry with backoff; check connectivity, timeout. |
+| `1` | runtime / network error | already retried twice; check connectivity, or raise `--retries`. |
 | `2` | usage / invalid input or missing config | **fix the command**: bad flag, missing required arg, malformed JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
 | `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. |
 
@@ -264,6 +265,17 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
   task): exit `3`. Retrying with higher `--effort` will **not** fix it; fix the
   input. Higher effort/`--no-cache` only helps transient fetch problems.
 - **Streaming output is NDJSON, not a single JSON document.** Parse per line.
+- **Transient failures are already retried** (408, 409, 429, 5xx; twice by
+  default, exponential backoff with jitter, honouring `Retry-After`). By the
+  time you see a non-zero exit the retries are spent, so **do not add your own
+  retry loop on top** without lowering `--retries` first. `400` and `404` are
+  never retried: the request is wrong, fix it. Retries share the `--timeout`
+  deadline and cannot extend it.
+- **Streaming commands retry only stream establishment.** Once `automate` or
+  `research` starts emitting events it is never replayed, so a mid-stream
+  failure is final.
+- **Retry lines go to stderr and are suppressed under `-o json`** unless
+  `--debug` is set, so they never appear in your NDJSON.
 - **`--timeout` does not apply to `automate`/`research`** (a hard timeout would cut
   the stream). Cancel by killing the process instead. Non-streaming calls default
   to a 2-minute deadline; pass `--timeout 0` to disable it.

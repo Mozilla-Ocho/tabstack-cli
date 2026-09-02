@@ -77,14 +77,14 @@ func TestFlagPlacement(t *testing.T) {
 		has  []string
 		hasA []string // must NOT be present
 	}{
-		{"extract", []string{"api-key", "base-url", "timeout", "org"}, nil},
-		{"generate", []string{"api-key", "base-url", "timeout", "org"}, nil},
-		{"agent", []string{"api-key", "base-url", "timeout", "org"}, nil},
-		{"mcp", []string{"api-key", "base-url", "timeout", "auth-url"}, []string{"org"}},
-		{"keys", []string{"auth-url", "org"}, []string{"api-key", "base-url", "timeout"}},
-		{"auth", []string{"auth-url"}, []string{"api-key", "base-url", "timeout"}},
-		{"config", []string{"base-url", "auth-url"}, []string{"api-key", "timeout"}},
-		{"schema", nil, []string{"api-key", "base-url", "auth-url", "timeout", "org"}},
+		{"extract", []string{"api-key", "base-url", "timeout", "retries", "org"}, nil},
+		{"generate", []string{"api-key", "base-url", "timeout", "retries", "org"}, nil},
+		{"agent", []string{"api-key", "base-url", "timeout", "retries", "org"}, nil},
+		{"mcp", []string{"api-key", "base-url", "timeout", "retries", "auth-url"}, []string{"org"}},
+		{"keys", []string{"auth-url", "org"}, []string{"api-key", "base-url", "timeout", "retries"}},
+		{"auth", []string{"auth-url"}, []string{"api-key", "base-url", "timeout", "retries"}},
+		{"config", []string{"base-url", "auth-url"}, []string{"api-key", "timeout", "retries"}},
+		{"schema", nil, []string{"api-key", "base-url", "auth-url", "timeout", "retries", "org"}},
 	}
 
 	for _, tc := range cases {
@@ -102,7 +102,7 @@ func TestFlagPlacement(t *testing.T) {
 	}
 
 	// Only the flags every command uses stay on the root.
-	for _, name := range []string{"api-key", "base-url", "auth-url", "timeout", "org"} {
+	for _, name := range []string{"api-key", "base-url", "auth-url", "timeout", "retries", "org"} {
 		if root.PersistentFlags().Lookup(name) != nil {
 			t.Errorf("--%s is still a root persistent flag", name)
 		}

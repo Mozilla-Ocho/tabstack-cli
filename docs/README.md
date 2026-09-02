@@ -48,6 +48,7 @@ failed in-band.
 | `--base-url` | `extract`, `generate`, `agent`, `mcp`, `config` | product API host |
 | `--auth-url` | `auth`, `keys`, `config`, `mcp` | console host |
 | `--timeout <dur>` | `extract`, `generate`, `agent`, `mcp` | non-streaming deadline, default `2m`, `0` disables |
+| `--retries <n>` | `extract`, `generate`, `agent`, `mcp` | retry 408/409/429/5xx, default `2`, `0` disables |
 | `--org <selector>` | `extract`, `generate`, `agent`, `keys`, `auth login` | act as another organisation, once |
 | `--debug` | `extract`, `generate`, `agent`, `mcp` | request id, timing, rate limits to stderr |
 

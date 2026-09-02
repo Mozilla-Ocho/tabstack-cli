@@ -467,6 +467,7 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `-o, --output pretty\|json` | Force an output mode (default: auto-detect) |
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
 | `--timeout <dur>` | Request timeout for non-streaming calls (default `2m`); `0` disables |
+| `--retries <n>` | Retry transient failures this many times (default `2`); `0` disables |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
 
 Failures carry their own diagnostics. An exit-3 error keeps the
@@ -476,6 +477,38 @@ organisation scoping, and `429` reports `Retry-After` when the server sent one.
 When the response carried an `x-trace-id`, the error ends with
 `(trace id <id>)`, so the id to quote in a support request is on the failure
 itself rather than only under `--debug`.
+
+### Retries
+
+Transient failures are retried automatically, twice by default, matching the
+Tabstack SDKs. Without this the CLI was the least reliable way to call the API
+despite being the one aimed at CI: a 429 the Python client absorbs silently
+would fail a build.
+
+Only failures that repeating can fix are retried: **408, 409, 429, and 5xx**. A
+`400` or `404` means the request itself is wrong, so it fails immediately rather
+than multiplying the cost of a mistake.
+
+Backoff is exponential with full jitter, so several CLI invocations in the same
+CI job do not retry in lockstep and collide again. A `Retry-After` header wins
+over the computed backoff, capped so a mistaken `Retry-After: 86400` cannot
+stall a build. Retries share the `--timeout` deadline and the process context,
+so they can never extend either, and Ctrl-C ends them at once.
+
+```bash
+tabstack extract markdown "$url" --retries 5   # flaky network
+tabstack extract markdown "$url" --retries 0   # fail fast, one attempt
+```
+
+Each retry prints a line to stderr so a slow command is explicable rather than
+looking hung. Under `--output json` that line is suppressed unless `--debug` is
+also set, keeping machine-facing stderr quiet.
+
+**Streaming commands are different.** `automate` and `research` retry only while
+*establishing* the stream: a non-2xx or a connection failure arrives before any
+event, so replaying it is safe. Once the server answers, the task is running and
+the stream is never replayed, because there is no way to do so without either
+repeating events you have already seen or dropping ones you have not.
 
 **`--debug`**: for each API call, print a line to **stderr** (so it never
 touches piped stdout) with the HTTP status, elapsed time to first byte, the

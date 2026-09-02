@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +91,71 @@ func TestDebugLineOmitsAbsentFields(t *testing.T) {
 	}
 	if !strings.Contains(line, "1s") {
 		t.Errorf("line missing elapsed:\n%s", line)
+	}
+}
+
+// TestRetrySinkVisibility pins when a retry is mentioned. Pretty mode says so
+// unprompted, because a command that pauses for seconds otherwise looks hung.
+// JSON mode stays quiet unless --debug is set, so a machine consumer's stderr
+// is no noisier than before.
+func TestRetrySinkVisibility(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    ui.OutputMode
+		debug   bool
+		wantNil bool
+	}{
+		{"pretty without debug still reports", ui.ModePretty, false, false},
+		{"pretty with debug reports", ui.ModePretty, true, false},
+		{"json without debug stays quiet", ui.ModeJSON, false, true},
+		{"json with debug reports", ui.ModeJSON, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			r := ui.Renderer{Out: io.Discard, Err: &buf, Mode: tc.mode, Styles: ui.NewStyles(true)}
+			sink := retrySink(r, tc.debug)
+
+			if tc.wantNil {
+				if sink != nil {
+					t.Fatal("expected no sink, so the client is not asked to report")
+				}
+				return
+			}
+			if sink == nil {
+				t.Fatal("expected a sink")
+			}
+
+			sink(client.RetryInfo{
+				Method: "POST", URL: "https://api.test/x",
+				Attempt: 1, Remaining: 1,
+				StatusCode: 429, Wait: 500 * time.Millisecond, TraceID: "t-1",
+			})
+			got := buf.String()
+			if tc.mode == ui.ModeJSON {
+				var payload struct {
+					Retry struct {
+						Status    int    `json:"status"`
+						WaitMS    int64  `json:"wait_ms"`
+						Attempt   int    `json:"attempt"`
+						Remaining int    `json:"remaining"`
+						TraceID   string `json:"trace_id"`
+					} `json:"retry"`
+				}
+				if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &payload); err != nil {
+					t.Fatalf("not valid JSON: %v (%q)", err, got)
+				}
+				if payload.Retry.Status != 429 || payload.Retry.WaitMS != 500 || payload.Retry.TraceID != "t-1" {
+					t.Errorf("payload = %+v", payload.Retry)
+				}
+				return
+			}
+			for _, want := range []string{"retry", "429", "500ms", "attempt 1", "1 left", "t-1"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("line missing %q: %q", want, got)
+				}
+			}
+		})
 	}
 }

@@ -60,6 +60,7 @@ func runMCP(ctx context.Context) error {
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
 	}
+	opts = append(opts, client.WithRetries(flagRetries))
 	// Diagnostics go to stderr, which is safe here: the stdio invariant only
 	// reserves stdout for JSON-RPC frames.
 	if flagDebug {

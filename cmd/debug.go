@@ -94,3 +94,71 @@ func resetIn(reset time.Time, now func() time.Time) (string, bool) {
 	d := max(reset.Sub(now()).Round(time.Second), 0)
 	return d.String(), true
 }
+
+// retrySink renders one retried attempt, in the same shape as the debug line
+// so a slow run reads consistently. It always writes to stderr.
+//
+// Visibility follows the output mode. In pretty mode a retry is worth
+// mentioning unprompted, because otherwise a command that pauses for several
+// seconds looks like a hang. In JSON mode it is suppressed unless --debug is
+// set, so a machine consumer's stderr stays as quiet as it was before.
+func retrySink(r ui.Renderer, debug bool) func(client.RetryInfo) {
+	if r.Mode == ui.ModeJSON && !debug {
+		return nil
+	}
+	return func(info client.RetryInfo) {
+		if r.Mode == ui.ModeJSON {
+			fmt.Fprintln(r.Err, retryJSON(info))
+			return
+		}
+		fmt.Fprintln(r.Err, r.Styles.Muted.Render(retryLine(info)))
+	}
+}
+
+// retryLine is the human-readable one-liner, mirroring debugLine.
+func retryLine(info client.RetryInfo) string {
+	var b strings.Builder
+	b.WriteString("retry ")
+	if info.StatusCode > 0 {
+		fmt.Fprintf(&b, "%d ", info.StatusCode)
+	} else if info.Err != "" {
+		b.WriteString(info.Err + " ")
+	}
+	fmt.Fprintf(&b, "in %s", info.Wait.Round(time.Millisecond))
+	fmt.Fprintf(&b, " (attempt %d, %d left)", info.Attempt, info.Remaining)
+	if info.TraceID != "" {
+		b.WriteString(" trace " + info.TraceID)
+	}
+	return b.String()
+}
+
+// retryJSON is the machine-readable form, nested under a "retry" key so it is
+// distinguishable from a debug line on the same stream.
+func retryJSON(info client.RetryInfo) string {
+	payload := struct {
+		Retry struct {
+			Method    string `json:"method,omitempty"`
+			URL       string `json:"url,omitempty"`
+			Status    int    `json:"status,omitempty"`
+			Error     string `json:"error,omitempty"`
+			WaitMS    int64  `json:"wait_ms"`
+			Attempt   int    `json:"attempt"`
+			Remaining int    `json:"remaining"`
+			TraceID   string `json:"trace_id,omitempty"`
+		} `json:"retry"`
+	}{}
+	payload.Retry.Method = info.Method
+	payload.Retry.URL = info.URL
+	payload.Retry.Status = info.StatusCode
+	payload.Retry.Error = info.Err
+	payload.Retry.WaitMS = info.Wait.Milliseconds()
+	payload.Retry.Attempt = info.Attempt
+	payload.Retry.Remaining = info.Remaining
+	payload.Retry.TraceID = info.TraceID
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return `{"retry":{}}`
+	}
+	return string(raw)
+}
