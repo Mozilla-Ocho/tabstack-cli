@@ -28,6 +28,7 @@ func newAuthCmd() *cobra.Command {
 		Long: "Manage the user-scoped session used for sign-in and organisation\n" +
 			"management. API keys themselves are organisation scoped and managed\n" +
 			"with `tabstack keys`.",
+		Example: "  tabstack auth login\n  tabstack auth status\n  tabstack auth switch acme",
 	}
 	cmd.AddCommand(
 		newAuthLoginCmd(),
@@ -43,6 +44,7 @@ func newAuthStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "status",
 		Short:       "Show who you are signed in as and which credential is in play",
+		Example:     "  # What have I changed, and what has moved upstream?\n  tabstack schema status\n\n  # Skip the network; only report local edits\n  tabstack schema status --local",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -267,6 +269,7 @@ func newAuthLogoutCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "logout",
 		Short:       "Revoke this session (or all of them) and clear it locally",
+		Example:     "  # Revoke this session only\n  tabstack auth logout\n\n  # Revoke every session, on every machine (asks first)\n  tabstack auth logout --all --yes",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -336,6 +339,7 @@ func newAuthSessionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "sessions",
 		Short:       "List your CLI sessions",
+		Example:     "  # List your CLI sessions; the current one is marked\n  tabstack auth sessions\n\n  # Revoke one by id\n  tabstack auth sessions --revoke sess_abc123",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer

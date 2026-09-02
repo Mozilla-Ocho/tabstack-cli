@@ -19,6 +19,7 @@ func newKeysCmd() *cobra.Command {
 		Long: "API keys are scoped to an organisation and are the credential product\n" +
 			"commands send. They are managed through your signed-in session, so these\n" +
 			"commands need `tabstack auth login` first.",
+		Example: "  tabstack keys list --org acme\n  tabstack keys create --org acme --name cli-laptop",
 	}
 	cmd.AddCommand(newKeysCreateCmd(), newKeysListCmd(), newKeysUseCmd(), newKeysRevokeCmd())
 	return cmd
@@ -32,6 +33,7 @@ func newKeysUseCmd() *cobra.Command {
 			"organisation, replacing any key currently stored. Pass a key id (see\n" +
 			"`tabstack keys list`) to pick directly; with no id, the single key is\n" +
 			"adopted automatically or you are prompted to choose.",
+		Example:     "  # Adopt the organisation's only key, or pick from a list\n  tabstack keys use\n\n  # Adopt a specific one (id from `tabstack keys list`)\n  tabstack keys use key_abc123",
 		Args:        cobra.MaximumNArgs(1),
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,6 +61,7 @@ func newKeysCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "create",
 		Short:       "Create an API key for an organisation and store it",
+		Example:     "  # Create a key for the active organisation and store it\n  tabstack keys create\n\n  # Name it, and create it for a specific organisation\n  tabstack keys create --org acme --name cli-laptop",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, _, err := requireSession()
@@ -96,6 +99,7 @@ func newKeysListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "list",
 		Short:       "List an organisation's API keys (previews only)",
+		Example:     "  # Previews only; the plaintext is never printed\n  tabstack keys list\n  tabstack keys list --org acme",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -160,6 +164,7 @@ func newKeysRevokeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "revoke <key-id>",
 		Short:       "Revoke an API key",
+		Example:     "  # Asks before revoking, since this cannot be undone\n  tabstack keys revoke key_abc123\n\n  # Skip the prompt, for scripts\n  tabstack keys revoke key_abc123 --yes",
 		Args:        exactArgsNamed("<key-id>"),
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {

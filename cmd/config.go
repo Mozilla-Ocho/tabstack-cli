@@ -21,6 +21,7 @@ func newConfigCmd() *cobra.Command {
 			"printing a secret in full. Migration to the current config shape happens\n" +
 			"automatically on the next save; these commands are for looking at the\n" +
 			"result and clearing out what is no longer used.",
+		Example: "  tabstack config show\n  tabstack config path",
 	}
 	cmd.AddCommand(newConfigPathCmd(), newConfigShowCmd(), newConfigDropLegacyKeyCmd())
 	return cmd
@@ -30,6 +31,7 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "path",
 		Short:       "Print the path of the config file",
+		Example:     "  # Print the config file path (bare, for scripting)\n  tabstack config path\n  cat \"$(tabstack config path)\"",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -50,6 +52,7 @@ func newConfigShowCmd() *cobra.Command {
 		Long: "Print every organisation the CLI knows about and the state of its API key,\n" +
 			"not just the active one. Keys and tokens are redacted to their first and\n" +
 			"last four characters, so the output is safe to paste into a bug report.",
+		Example:     "  # Everything the CLI has stored, with secrets redacted\n  tabstack config show\n\n  # Machine-readable, still redacted\n  tabstack config show --output json | jq .orgs",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -272,6 +275,7 @@ func newConfigDropLegacyKeyCmd() *cobra.Command {
 			"config. It is only used while no organisation is active, so this refuses\n" +
 			"to run until the active organisation has a key of its own, which stops it\n" +
 			"leaving you with no working credential.",
+		Example:     "  # Remove the pre-organisation key once your org has its own\n  tabstack config drop-legacy-key\n\n  # Remove it regardless (you may be left with no credential)\n  tabstack config drop-legacy-key --force",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer

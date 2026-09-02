@@ -42,6 +42,7 @@ func newSchemaCmd() *cobra.Command {
 		Long: "Work with the public tabstack-schemas library: list the available\n" +
 			"schemas, pull them into a local store, and check or remove pulled copies.\n" +
 			"Pulled schemas feed `tabstack extract json --schema-name`.",
+		Example: "  tabstack schema list\n  tabstack schema pull job-posting\n  tabstack extract json https://example.com/jobs/1 --schema-name job-posting",
 	}
 	cmd.AddCommand(
 		newSchemaListCmd(),
@@ -63,6 +64,7 @@ func newSchemaListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "list",
 		Short:       "List schemas in the library (or just the ones pulled locally)",
+		Example:     "  # Everything in the public library, grouped by category\n  tabstack schema list\n\n  # Only what you have pulled, without touching the network\n  tabstack schema list --local\n\n  # Ignore the cached index and refetch it\n  tabstack schema list --refresh",
 		Annotations: map[string]string{"skipClient": "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -106,6 +108,7 @@ func newSchemaPullCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "pull [selector...]",
 		Short:       "Pull schemas from the library into a local store",
+		Example:     "  # By bare name, by category, or by full repo path\n  tabstack schema pull job-posting\n  tabstack schema pull jobs\n  tabstack schema pull jobs/job-posting.json\n\n  # Everything, overwriting local edits without asking\n  tabstack schema pull --all --force\n\n  # Keep a project-local store instead of the default\n  tabstack schema pull job-posting --storage ./schemas",
 		Annotations: map[string]string{"skipClient": "true"},
 		Long: "Pull one or more schemas into a local store (default\n" +
 			"$XDG_CONFIG_HOME/tabstack/schemas, or ~/.config/tabstack/schemas).\n\n" +
@@ -164,6 +167,7 @@ func newSchemaStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Short:       "Show which pulled schemas are modified or out of date",
+		Example:     "  # What have I changed, and what has moved upstream?\n  tabstack schema status\n\n  # Skip the network; only report local edits\n  tabstack schema status --local",
 		Annotations: map[string]string{"skipClient": "true"},
 		Args:        cobra.NoArgs,
 		Long: "Report the state of each pulled schema by comparing it against the\n" +
@@ -191,6 +195,7 @@ func newSchemaPathCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "path <name>",
 		Short:             "Print the local file path of a pulled schema",
+		Example:           "  # Print a stored schema's path, handy for other tools\n  tabstack schema path job-posting\n  cat \"$(tabstack schema path job-posting)\"",
 		Annotations:       map[string]string{"skipClient": "true"},
 		Args:              exactArgsNamed("<name>"),
 		ValidArgsFunction: completeLocalSchemaNames,
@@ -220,6 +225,7 @@ func newSchemaRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "rm <selector...>",
 		Short:             "Remove pulled schemas from the local store",
+		Example:           "  tabstack schema rm job-posting\n  tabstack schema rm jobs/job-posting.json finance/crypto-asset.json",
 		Annotations:       map[string]string{"skipClient": "true"},
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeLocalSchemaNames,

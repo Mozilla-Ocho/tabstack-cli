@@ -20,6 +20,7 @@ func newAuthSwitchCmd() *cobra.Command {
 			"never signs you in again; it selects which stored API key product calls\n" +
 			"use. Pass an organisation id, name, or unique name prefix, or run with no\n" +
 			"argument to pick from a list.",
+		Example:           "  # Pick from a list\n  tabstack auth switch\n\n  # By id, exact name, or unique name prefix\n  tabstack auth switch org_01hxyz\n  tabstack auth switch acme",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeOrgs,
 		Annotations:       map[string]string{"skipClient": "true"},

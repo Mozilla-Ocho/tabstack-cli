@@ -19,8 +19,9 @@ const maxInstructionsLen = 20000
 // and leaves room for future generate methods.
 func newGenerateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "generate",
-		Short: "Fetch a URL and transform its content with AI",
+		Use:     "generate",
+		Short:   "Fetch a URL and transform its content with AI",
+		Example: "  tabstack generate json https://example.com \\\n    --instructions \"summarise in three bullets\" --schema '{\"type\":\"object\"}'",
 	}
 	cmd.AddCommand(newGenerateJSONCmd())
 	return cmd
@@ -45,7 +46,8 @@ func newGenerateJSONCmd() *cobra.Command {
 			"--instructions and --schema accept a literal string, @file, or - for\n" +
 			"stdin (only one may read stdin per invocation). Alternatively reference a\n" +
 			"schema you pulled with `tabstack schema pull` via --schema-name.",
-		Args: exactArgsNamed("<url>"),
+		Example: "  # Transform a page into a shape you describe\n  tabstack generate json https://example.com \\\n    --instructions \"summarise this page in three bullet points\" \\\n    --schema '{\"type\":\"object\",\"properties\":{\"bullets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}'\n\n  # Long instructions from a file, schema from the library\n  tabstack generate json https://example.com \\\n    --instructions @prompt.txt --schema-name news-article",
+		Args:    exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validURL(args[0]); err != nil {
 				return withCode(2, err)

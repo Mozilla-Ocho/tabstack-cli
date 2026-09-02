@@ -68,8 +68,38 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "tabstack",
 		Short: "Command-line client for the Tabstack AI API",
-		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web " +
-			"research, and structured extraction and generation from any URL.",
+		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web\n" +
+			"research, and structured extraction and generation from any URL.\n" +
+			"\n" +
+			"New here? Run `tabstack auth login` first.\n" +
+			"\n" +
+			"CREDENTIALS\n" +
+			"  Two, never interchangeable. A session (`auth login`) is user scoped and\n" +
+			"  goes only to the console; an API key (`keys create`) is organisation\n" +
+			"  scoped and is what product commands send. A key is resolved from, in\n" +
+			"  order: --api-key, TABSTACK_API_KEY, the --org override's stored key,\n" +
+			"  then the active organisation's.\n" +
+			"\n" +
+			"ENVIRONMENT\n" +
+			"  TABSTACK_API_KEY       API key for product calls; overrides stored keys\n" +
+			"  TABSTACK_BASE_URL      product API host (default https://api.tabstack.ai/v1)\n" +
+			"  TABSTACK_AUTH_URL      auth and management host (default https://console.tabstack.ai)\n" +
+			"  TABSTACK_OAUTH_SCOPES  override the scopes requested at login\n" +
+			"  NO_COLOR               disable coloured output, same as --no-color\n" +
+			"  XDG_CONFIG_HOME        where config.toml and pulled schemas live\n" +
+			"\n" +
+			"EXIT CODES\n" +
+			"  0  success\n" +
+			"  1  runtime or network error\n" +
+			"  2  usage error, bad input, or missing configuration\n" +
+			"  3  the API rejected the request, or a streamed task failed\n" +
+			"\n" +
+			"OUTPUT\n" +
+			"  Pretty on a terminal, JSON when piped, so `tabstack ... | jq` needs no\n" +
+			"  flag. Force it with --output. Streaming commands emit NDJSON, one event\n" +
+			"  per line. Results go to stdout; progress, prompts, and warnings go to\n" +
+			"  stderr.",
+		Example:       "  # Sign in once, then check it works\n  tabstack auth login\n  tabstack extract markdown https://example.com\n\n  # Extract structured data using a schema from the public library\n  tabstack schema pull job-posting\n  tabstack extract json https://example.com/jobs/1 --schema-name job-posting\n\n  # Output is JSON automatically when piped, so jq just works\n  tabstack extract markdown https://example.com | jq -r .content",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,

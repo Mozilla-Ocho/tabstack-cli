@@ -58,6 +58,7 @@ func newAuthLoginCmd() *cobra.Command {
 		Long: "Open the Tabstack console in your browser, sign in, and store the\n" +
 			"resulting session. The session is user scoped; API keys are organisation\n" +
 			"scoped and set up separately at the end of login.",
+		Example:     "  # Sign in and set up an API key for the organisation\n  tabstack auth login\n\n  # Sign in without creating a key (CI, or you already have one)\n  tabstack auth login --no-key\n\n  # Adopt an existing key rather than minting a new one\n  tabstack auth login --api-key-setup=existing",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mode, err := keySetupModeFrom(keySetup, noKey)

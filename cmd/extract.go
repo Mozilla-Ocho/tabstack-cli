@@ -12,8 +12,9 @@ import (
 // work itself, it just hosts the json and markdown subcommands.
 func newExtractCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "extract",
-		Short: "Fetch a URL and extract structured data or Markdown",
+		Use:     "extract",
+		Short:   "Fetch a URL and extract structured data or Markdown",
+		Example: "  tabstack extract markdown https://example.com\n  tabstack extract json https://example.com --schema-name job-posting",
 	}
 	cmd.AddCommand(newExtractMarkdownCmd(), newExtractJSONCmd())
 	return cmd
@@ -30,9 +31,10 @@ func newExtractMarkdownCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "markdown <url>",
-		Short: "Convert a URL's content to clean Markdown",
-		Args:  exactArgsNamed("<url>"),
+		Use:     "markdown <url>",
+		Short:   "Convert a URL's content to clean Markdown",
+		Example: "  # Clean Markdown for a page\n  tabstack extract markdown https://example.com\n\n  # Include the title, author, and other page metadata\n  tabstack extract markdown https://example.com --metadata\n\n  # Skip the cache, fetch via a UK exit node, work harder at it\n  tabstack extract markdown https://example.com --no-cache --geo GB --effort max\n\n  # Save the Markdown to a file (JSON when piped, so ask for the field)\n  tabstack extract markdown https://example.com | jq -r .content > page.md",
+		Args:    exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validURL(args[0]); err != nil {
 				return withCode(2, err)
@@ -83,7 +85,8 @@ func newExtractJSONCmd() *cobra.Command {
 			"Provide the schema inline with --schema (a literal string, @file, or -\n" +
 			"for stdin), or use --schema-name to reference a schema you pulled with\n" +
 			"`tabstack schema pull` (a bare name or full repo path).",
-		Args: exactArgsNamed("<url>"),
+		Example: "  # Inline schema\n  tabstack extract json https://example.com --schema '{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"}}}'\n\n  # Schema from a file, or from stdin\n  tabstack extract json https://example.com --schema @schema.json\n  cat schema.json | tabstack extract json https://example.com --schema -\n\n  # A schema you pulled from the library\n  tabstack schema pull job-posting\n  tabstack extract json https://example.com/jobs/1 --schema-name job-posting",
+		Args:    exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validURL(args[0]); err != nil {
 				return withCode(2, err)

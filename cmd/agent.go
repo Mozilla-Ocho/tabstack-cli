@@ -24,8 +24,9 @@ const maxQueryLen = 10000
 // is a plain request/response.
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Run AI browser-automation and research tasks",
+		Use:     "agent",
+		Short:   "Run AI browser-automation and research tasks",
+		Example: "  tabstack agent automate \"search for a product and open the first result\" --url https://example.com\n  tabstack agent research \"what changed in HTTP/3 in 2024?\"",
 	}
 	cmd.AddCommand(newAutomateCmd(), newResearchCmd(), newInputCmd())
 	return cmd
@@ -190,7 +191,8 @@ func newAutomateCmd() *cobra.Command {
 			"workflows.\n\n" +
 			"Pass --interactive to let the task pause and request input mid-run; when\n" +
 			"it does, respond with `tabstack agent input <request-id>`.",
-		Args: exactArgsNamed("<task>"),
+		Example: "  # Run a task, streaming progress as it works\n  tabstack agent automate \"find the pricing page and list the plans\" --url https://example.com\n\n  # Supply context for a form\n  tabstack agent automate \"fill in the contact form\" --url https://example.com/contact \\\n    --data '{\"name\":\"Ada\",\"email\":\"ada@example.com\"}'\n\n  # Let the task pause to ask you something mid-run\n  tabstack agent automate \"book the cheapest flight\" --url https://example.com --interactive\n\n  # Constrain how hard it tries\n  tabstack agent automate \"find the careers page\" --url https://example.com --max-iterations 10",
+		Args:    exactArgsNamed("<task>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validGeo(geo); err != nil {
 				return withCode(2, err)
@@ -267,7 +269,8 @@ func newResearchCmd() *cobra.Command {
 		Long: "Search the web, analyse sources, and synthesise an answer to a query.\n\n" +
 			"Progress streams through phases as the research runs. --mode fast\n" +
 			"(default) returns quick answers; balanced does deeper multi-source work.",
-		Args: exactArgsNamed("<query>"),
+		Example: "  # Quick answer with cited sources\n  tabstack agent research \"what changed in HTTP/3 in 2024?\"\n\n  # Deeper multi-source research\n  tabstack agent research \"compare managed Postgres pricing\" --mode balanced\n\n  # Machine-readable: one JSON event per line, {\"event\":..., \"data\":...}\n  tabstack agent research \"who maintains curl?\" --output json | jq -c .event",
+		Args:    exactArgsNamed("<query>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validResearchMode(mode); err != nil {
 				return withCode(2, err)
@@ -318,7 +321,8 @@ func newInputCmd() *cobra.Command {
 			"The --data payload must be a JSON object:\n" +
 			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  to provide values\n" +
 			"  {\"cancelled\":true}                                to decline",
-		Args: exactArgsNamed("<request-id>"),
+		Example: "  # Answer a paused automation (the request id comes from its stream)\n  tabstack agent input req_abc123 --data '{\"fields\":[{\"ref\":\"email\",\"value\":\"ada@example.com\"}]}'\n\n  # Decline the request instead\n  tabstack agent input req_abc123 --data '{\"cancelled\":true}'",
+		Args:    exactArgsNamed("<request-id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
 				return withCode(2, fmt.Errorf("the --data flag is required: a JSON object with \"fields\", or {\"cancelled\":true}"))
