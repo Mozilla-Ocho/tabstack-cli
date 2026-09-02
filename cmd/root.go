@@ -122,6 +122,14 @@ func NewRootCmd() *cobra.Command {
 	pf := root.PersistentFlags()
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
+	// --debug stays global even though only product-host calls are instrumented.
+	// Cobra decides whether a flag consumes the next argument while it is still
+	// looking for the subcommand, and it can only do that for flags it already
+	// knows. Registering this boolean per subtree made `tabstack --debug extract
+	// markdown URL` swallow "extract" as the flag's value and fail with
+	// "Unknown command markdown". Valued flags such as --base-url survive that
+	// position by luck; booleans cannot.
+	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 	_ = root.RegisterFlagCompletionFunc("output", fixedCompletions("pretty", "json"))
 
 	agent, extract, generate := newAgentCmd(), newExtractCmd(), newGenerateCmd()
@@ -133,7 +141,6 @@ func NewRootCmd() *cobra.Command {
 	for _, c := range []*cobra.Command{agent, extract, generate} {
 		addProductFlags(c)
 		addOrgFlag(c)
-		addDebugFlag(c)
 	}
 
 	// Auth-host commands talk to the console, so they take --auth-url. keys
@@ -153,7 +160,6 @@ func NewRootCmd() *cobra.Command {
 	// (see resolveMCPKey), so it does not take that flag.
 	addProductFlags(mcp)
 	addAuthHostFlag(mcp)
-	addDebugFlag(mcp)
 
 	// schema is deliberately absent: it talks only to raw.githubusercontent.com
 	// and the local store, so none of these apply to it.
@@ -190,12 +196,6 @@ func addAuthHostFlag(cmd *cobra.Command) {
 func addOrgFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	_ = cmd.RegisterFlagCompletionFunc("org", completeOrgs)
-}
-
-// addDebugFlag registers --debug. Only product-host calls are instrumented, so
-// it goes on the commands that make them.
-func addDebugFlag(cmd *cobra.Command) {
-	cmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 }
 
 // resolveMode decides the output mode. An explicit --output wins; otherwise we

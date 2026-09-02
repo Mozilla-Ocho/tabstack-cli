@@ -469,6 +469,14 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--timeout <dur>` | Request timeout for non-streaming calls (default `2m`); `0` disables |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
 
+Failures carry their own diagnostics. An exit-3 error keeps the
+`api error (NNN): <message>` core and appends guidance for the statuses where
+there is something specific to do: `401` points at re-authentication, `403` at
+organisation scoping, and `429` reports `Retry-After` when the server sent one.
+When the response carried an `x-trace-id`, the error ends with
+`(trace id <id>)`, so the id to quote in a support request is on the failure
+itself rather than only under `--debug`.
+
 **`--debug`**: for each API call, print a line to **stderr** (so it never
 touches piped stdout) with the HTTP status, elapsed time to first byte, the
 `x-trace-id` request id to quote in a support request, and the rate-limit

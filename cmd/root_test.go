@@ -77,14 +77,14 @@ func TestFlagPlacement(t *testing.T) {
 		has  []string
 		hasA []string // must NOT be present
 	}{
-		{"extract", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
-		{"generate", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
-		{"agent", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
-		{"mcp", []string{"api-key", "base-url", "timeout", "auth-url", "debug"}, []string{"org"}},
+		{"extract", []string{"api-key", "base-url", "timeout", "org"}, nil},
+		{"generate", []string{"api-key", "base-url", "timeout", "org"}, nil},
+		{"agent", []string{"api-key", "base-url", "timeout", "org"}, nil},
+		{"mcp", []string{"api-key", "base-url", "timeout", "auth-url"}, []string{"org"}},
 		{"keys", []string{"auth-url", "org"}, []string{"api-key", "base-url", "timeout"}},
 		{"auth", []string{"auth-url"}, []string{"api-key", "base-url", "timeout"}},
 		{"config", []string{"base-url", "auth-url"}, []string{"api-key", "timeout"}},
-		{"schema", nil, []string{"api-key", "base-url", "auth-url", "timeout", "org", "debug"}},
+		{"schema", nil, []string{"api-key", "base-url", "auth-url", "timeout", "org"}},
 	}
 
 	for _, tc := range cases {
@@ -102,12 +102,12 @@ func TestFlagPlacement(t *testing.T) {
 	}
 
 	// Only the flags every command uses stay on the root.
-	for _, name := range []string{"api-key", "base-url", "auth-url", "timeout", "org", "debug"} {
+	for _, name := range []string{"api-key", "base-url", "auth-url", "timeout", "org"} {
 		if root.PersistentFlags().Lookup(name) != nil {
 			t.Errorf("--%s is still a root persistent flag", name)
 		}
 	}
-	for _, name := range []string{"output", "no-color"} {
+	for _, name := range []string{"output", "no-color", "debug"} {
 		if root.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("--%s should stay on the root", name)
 		}
@@ -284,5 +284,28 @@ func TestEveryLeafHasAnExample(t *testing.T) {
 	// passes forever.
 	if seen < 24 {
 		t.Errorf("only walked %d runnable commands, expected at least 24", seen)
+	}
+}
+
+// TestGlobalBooleanFlagsParseBeforeSubcommand guards a subtle cobra behaviour.
+//
+// Cobra decides whether a flag consumes the next argument while it is still
+// scanning for the subcommand, using only the flags it knows at that point. A
+// boolean registered on a subtree rather than the root is therefore assumed to
+// take a value, so `tabstack --debug extract markdown URL` swallowed "extract"
+// and failed with "Unknown command markdown". Valued flags survive that
+// position by accident; booleans do not, which is why --debug is global.
+func TestGlobalBooleanFlagsParseBeforeSubcommand(t *testing.T) {
+	for _, flag := range []string{"--debug", "--no-color"} {
+		t.Run(flag, func(t *testing.T) {
+			root := NewRootCmd()
+			cmd, _, err := root.Find([]string{flag, "extract", "markdown", "https://example.com"})
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if got := cmd.CommandPath(); got != "tabstack extract markdown" {
+				t.Errorf("%s before the subcommand resolved to %q, want the markdown command", flag, got)
+			}
+		})
 	}
 }

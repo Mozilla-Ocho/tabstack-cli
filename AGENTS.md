@@ -45,7 +45,7 @@ registered on the commands that read them, so passing one elsewhere is an
 | `--auth-url <url>` | `auth`, `keys`, `config`, `mcp` | Console root, overrides env + config. |
 | `--org <selector>` | `extract`, `generate`, `agent`, `keys`, `auth login` | Act as another org for one command. |
 | `--timeout <dur>` | `extract`, `generate`, `agent`, `mcp` | Timeout for **non-streaming** calls only, e.g. `30s`. Defaults to `2m`; `0` disables. Never applies to `automate`/`research`. |
-| `--debug` | `extract`, `generate`, `agent`, `mcp` | Request id, timing, rate limits, to stderr. |
+| `--debug` | everything | Request id, timing, rate limits, to stderr. Only product-host calls are instrumented. |
 
 **Every command emits JSON under `-o json`**, including `auth`, `keys`,
 `config`, and `schema`, so account and configuration state is scriptable the
@@ -82,7 +82,7 @@ Non-streaming. Single JSON response.
 | Flag | Required | Notes |
 |------|----------|-------|
 | `--effort min\|standard\|max` | no | Fetch effort, default `standard`. See table below. |
-| `--geo <CC>` | no | ISO 3166-1 alpha-2 country, e.g. `GB`. |
+| `--geo <CC>` | no | ISO 3166-1 alpha-2 country, e.g. `GB`. Format is checked locally (two ASCII letters, any case); a bad value exits `2` with no request. An empty value means no geotargeting. |
 | `--metadata` | no | Include page metadata (title, author, …) in the response. |
 | `--raw` | no | Print **only** `content`, no envelope, no header, in either mode. Mutually exclusive with `--metadata` (exit `2`). |
 | `--no-cache` | no | Bypass cache, fetch fresh. |
@@ -237,6 +237,19 @@ most expensive.
 | `1` | runtime / network error | retry with backoff; check connectivity, timeout. |
 | `2` | usage / invalid input or missing config | **fix the command**: bad flag, missing required arg, malformed JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
 | `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. |
+
+Exit-3 messages keep the literal `api error (NNN): <message>` core, so existing
+matches on that substring still work. Three statuses append actionable guidance,
+and every response carrying an `x-trace-id` appends `(trace id <id>)`:
+
+| Status | Appended guidance |
+|--------|-------------------|
+| `401` | key may be revoked or expired; run `tabstack auth login` or check `tabstack auth status` |
+| `403` | key may belong to a different organisation; check `tabstack auth status` and `--org` |
+| `429` | rate limited; includes `retry after <n>s` when the server sent `Retry-After` |
+
+Quote the trace id in a support request. It is now on the failure itself, so
+`--debug` is no longer needed to obtain it.
 
 Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
 

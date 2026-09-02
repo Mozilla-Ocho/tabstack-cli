@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -436,5 +437,74 @@ func TestValidSchemaStaysSilent(t *testing.T) {
 	}
 	if errBuf.Len() != 0 {
 		t.Errorf("valid schema produced stderr noise: %q", errBuf.String())
+	}
+}
+
+// TestGeoValidationExitsTwo checks the local --geo check is wired into every
+// command that offers the flag, and that it lands on exit 2 like --effort.
+// Format only: a real but unsupported country is the server's call, not ours.
+func TestGeoValidationExitsTwo(t *testing.T) {
+	commands := map[string]func() *cobra.Command{
+		"extract markdown": newExtractMarkdownCmd,
+		"extract json":     newExtractJSONCmd,
+		"generate json":    newGenerateJSONCmd,
+		"agent automate":   newAutomateCmd,
+	}
+
+	// Values that must be rejected before any request is made. Blank is
+	// deliberately absent: `--geo ""` is the ordinary shell idiom for an
+	// optional flag value, and geoTarget() already omits the field entirely
+	// when it is blank, so it means "no geotargeting" rather than "invalid".
+	bad := []string{"England", "GBR", "G", "G1", "12", "g b", "🇬🇧"}
+
+	for name, ctor := range commands {
+		for _, geo := range bad {
+			t.Run(name+"/"+geo, func(t *testing.T) {
+				isolate(t)
+				called := false
+				setTestAppWithClient(t, mockClientFunc(func(*http.Request) (*http.Response, error) {
+					called = true
+					return nil, errors.New("should not be reached")
+				}))
+
+				cmd := ctor()
+				// Satisfy each command's other required flags.
+				if f := cmd.Flags().Lookup("schema"); f != nil {
+					_ = cmd.Flags().Set("schema", `{"type":"object"}`)
+				}
+				if f := cmd.Flags().Lookup("instructions"); f != nil {
+					_ = cmd.Flags().Set("instructions", "do a thing")
+				}
+				if err := cmd.Flags().Set("geo", geo); err != nil {
+					t.Fatal(err)
+				}
+
+				arg := "https://example.com"
+				if name == "agent automate" {
+					arg = "do something"
+				}
+				err := cmd.RunE(cmd, []string{arg})
+				if got := codeOf(err); got != 2 {
+					t.Errorf("exit code = %d, want 2 (err: %v)", got, err)
+				}
+				if called {
+					t.Error("a request was made despite invalid --geo")
+				}
+			})
+		}
+	}
+}
+
+// TestBlankGeoMeansUnset pins the counterpart to TestGeoValidationExitsTwo:
+// a blank value is not an error, it is the absence of geotargeting, so
+// `--geo "$COUNTRY"` with an unset variable keeps working.
+func TestBlankGeoMeansUnset(t *testing.T) {
+	for _, blank := range []string{"", "   ", "\t"} {
+		if err := validGeo(blank); err != nil {
+			t.Errorf("validGeo(%q) = %v, want nil", blank, err)
+		}
+		if got := geoTarget(blank); got != nil {
+			t.Errorf("geoTarget(%q) = %+v, want nil so the field is omitted", blank, got)
+		}
 	}
 }

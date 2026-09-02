@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -60,13 +61,68 @@ func New(apiKey, baseURL string, opts ...Option) *Client {
 type APIError struct {
 	StatusCode int
 	Message    string
+
+	// TraceID is the x-trace-id response header, the id to quote in a support
+	// request. It was previously only reachable under --debug, which is exactly
+	// backwards: a failure is when you want it, and --debug is what you have to
+	// have known to pass beforehand.
+	TraceID string
+
+	// RetryAfter is the Retry-After header verbatim, kept as sent rather than
+	// parsed because the header may be either a seconds count or an HTTP date.
+	RetryAfter string
 }
 
 func (e *APIError) Error() string {
+	var b strings.Builder
+
+	// Lead with a plain word. fang title-cases the first word of a rendered
+	// error, so a message starting "api" reached users as "Api error (401)".
+	// Keeping the literal "api error (NNN):" substring intact means anything
+	// grepping stderr for it matches, which it did not while fang mangled it.
+	b.WriteString("request failed: ")
 	if e.Message != "" {
-		return fmt.Sprintf("product API error (%d): %s", e.StatusCode, e.Message)
+		fmt.Fprintf(&b, "api error (%d): %s", e.StatusCode, e.Message)
+	} else {
+		fmt.Fprintf(&b, "api error: status %d", e.StatusCode)
 	}
-	return fmt.Sprintf("product API error: status %d", e.StatusCode)
+	if g := e.guidance(); g != "" {
+		b.WriteString(". ")
+		b.WriteString(g)
+	}
+	if e.TraceID != "" {
+		fmt.Fprintf(&b, " (trace id %s)", e.TraceID)
+	}
+	return b.String()
+}
+
+// guidance turns the status code into the next thing to try. Only the three
+// statuses with a specific, actionable cause get one; a generic "check your
+// request" on everything else would be noise. Kept out of Error's happy path so
+// the wording lives in one readable place.
+func (e *APIError) guidance() string {
+	switch e.StatusCode {
+	case http.StatusUnauthorized:
+		return "The key may be revoked or expired: run `tabstack auth login`, or check `tabstack auth status`"
+	case http.StatusForbidden:
+		return "The key may belong to a different organisation: check `tabstack auth status`, and --org if you passed it"
+	case http.StatusTooManyRequests:
+		if e.RetryAfter != "" {
+			return "Rate limited: retry after " + humanRetryAfter(e.RetryAfter)
+		}
+		return "Rate limited: retry with backoff, or reduce concurrency"
+	}
+	return ""
+}
+
+// humanRetryAfter renders a Retry-After value for display. The header is either
+// a seconds count or an HTTP date; a bare number reads better with a unit, and
+// anything else is passed through untouched rather than guessed at.
+func humanRetryAfter(v string) string {
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+		return (time.Duration(secs) * time.Second).String()
+	}
+	return v
 }
 
 // newRequest builds a POST request to path with body marshalled as JSON.
@@ -160,5 +216,10 @@ func decodeError(resp *http.Response) error {
 	if json.Unmarshal(data, &payload) == nil && payload.Error != "" {
 		msg = payload.Error
 	}
-	return &APIError{StatusCode: resp.StatusCode, Message: msg}
+	return &APIError{
+		StatusCode: resp.StatusCode,
+		Message:    msg,
+		TraceID:    resp.Header.Get("X-Trace-Id"),
+		RetryAfter: resp.Header.Get("Retry-After"),
+	}
 }

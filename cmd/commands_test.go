@@ -32,6 +32,13 @@ func mockClient(status int, body string) *client.Client {
 	return client.New("test-key", "https://api.test", client.WithHTTPClient(h))
 }
 
+// mockClientFunc is mockClient with the round trip supplied by the caller, for
+// tests that need to assert whether a request was made at all.
+func mockClientFunc(fn func(*http.Request) (*http.Response, error)) *client.Client {
+	h := &http.Client{Transport: rtFunc(fn)}
+	return client.New("test-key", "https://api.test", client.WithHTTPClient(h))
+}
+
 // setTestAppWithClient installs a rootApp with a JSON renderer and the given
 // client, returning the output buffer.
 func setTestAppWithClient(t *testing.T, c *client.Client) *bytes.Buffer {
