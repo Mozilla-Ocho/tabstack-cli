@@ -57,7 +57,7 @@ func newExtractMarkdownCmd() *cobra.Command {
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&metadata, "metadata", false, "include extracted page metadata")
-	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addNoCacheFlag(f, &nocache)
 
 	return cmd
 }
@@ -112,7 +112,7 @@ func newExtractJSONCmd() *cobra.Command {
 	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
-	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addNoCacheFlag(f, &nocache)
 	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd

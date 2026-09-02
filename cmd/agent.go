@@ -292,7 +292,7 @@ func newResearchCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&mode, "mode", "", "research mode: fast|balanced")
 	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "fetch timeout per page, in seconds")
-	f.BoolVar(&nocache, "nocache", false, "skip cache and force fresh research")
+	addNoCacheFlag(f, &nocache)
 
 	return cmd
 }

@@ -117,6 +117,6 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 ## Conventions
 
-- New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`nocache` flag names.
+- New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`no-cache` flag names (register the last with `addNoCacheFlag`, which also wires the hidden `--nocache` alias).
 - `GeoTarget` and `Effort` (`min`/`standard`/`max`) are shared across fetch-based endpoints.
 - Validate caller input locally where the server has known limits (e.g. `maxInstructionsLen = 20000` in `cmd/generate.go`).

@@ -420,7 +420,8 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 
 **`--geo <CC>`**: route the fetch through a given country (ISO 3166-1 alpha-2, e.g. `GB`, `US`, `JP`).
 
-**`--nocache`**: bypass the cache and fetch fresh.
+**`--no-cache`**: bypass the cache and fetch fresh. The older spelling
+`--nocache` still works as a hidden alias, so existing scripts keep running.
 
 **Global flags** (valid on every command):
 

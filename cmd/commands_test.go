@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
+
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 )
 
@@ -197,5 +199,32 @@ func TestRunStreamCompletedUnsuccessful(t *testing.T) {
 	}
 	if !res.failed {
 		t.Error("res.failed = false, want true for success:false")
+	}
+}
+
+// TestNoCacheAliases checks both spellings set the same value and that only the
+// canonical one shows up in help. --nocache is kept working for existing
+// scripts, so a regression here breaks users silently rather than loudly.
+func TestNoCacheAliases(t *testing.T) {
+	for _, spelling := range []string{"--no-cache", "--nocache"} {
+		var v bool
+		fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
+		addNoCacheFlag(fs, &v)
+		if err := fs.Parse([]string{spelling}); err != nil {
+			t.Fatalf("%s: %v", spelling, err)
+		}
+		if !v {
+			t.Errorf("%s did not set the flag", spelling)
+		}
+	}
+
+	var v bool
+	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
+	addNoCacheFlag(fs, &v)
+	if !fs.Lookup("nocache").Hidden {
+		t.Error("--nocache should be hidden so help lists one spelling")
+	}
+	if fs.Lookup("no-cache").Hidden {
+		t.Error("--no-cache should be the visible spelling")
 	}
 }

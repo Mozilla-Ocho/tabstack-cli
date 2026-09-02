@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mattn/go-isatty"
+	"github.com/spf13/pflag"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
@@ -271,4 +272,16 @@ func geoTarget(country string) *client.GeoTarget {
 		return nil
 	}
 	return &client.GeoTarget{Country: strings.ToUpper(country)}
+}
+
+// addNoCacheFlag registers the cache-bypass flag shared by the fetch-based
+// commands. The canonical spelling is --no-cache, matching --no-color rather
+// than sitting one hyphen away from it; --nocache was the original spelling and
+// keeps working as a hidden alias so existing scripts do not break. Hiding it
+// keeps one entry in help instead of two that mean the same thing, the same
+// treatment --key gets against --api-key.
+func addNoCacheFlag(f *pflag.FlagSet, p *bool) {
+	f.BoolVar(p, "no-cache", false, "bypass the cache and fetch fresh")
+	f.BoolVar(p, "nocache", false, "alias for --no-cache")
+	_ = f.MarkHidden("nocache")
 }

@@ -62,7 +62,7 @@ Non-streaming. Single JSON response.
 | `--effort min\|standard\|max` | no | Fetch effort, default `standard`. See table below. |
 | `--geo <CC>` | no | ISO 3166-1 alpha-2 country, e.g. `GB`. |
 | `--metadata` | no | Include page metadata (title, author, …) in the response. |
-| `--nocache` | no | Bypass cache, fetch fresh. |
+| `--no-cache` | no | Bypass cache, fetch fresh. |
 
 Output (`-o json`):
 ```json
@@ -82,7 +82,7 @@ Non-streaming. **The response is exactly your schema's shape**, returned verbati
 | Flag | Required | Notes |
 |------|----------|-------|
 | `--schema` | **yes** | JSON schema (literal / `@file` / `-`). Must be valid JSON. |
-| `--effort` / `--geo` / `--nocache` | no | As above. |
+| `--effort` / `--geo` / `--no-cache` | no | As above. |
 
 Example:
 ```bash
@@ -99,7 +99,7 @@ instructions into the schema shape. Response is your schema's shape, verbatim.
 |------|----------|-------|
 | `--instructions` | **yes** | Transform prompt (literal / `@file` / `-`). Max **20,000** chars (validated locally). |
 | `--schema` | **yes** | Output JSON schema (literal / `@file` / `-`). |
-| `--effort` / `--geo` / `--nocache` | no | As above. |
+| `--effort` / `--geo` / `--no-cache` | no | As above. |
 
 Constraint: `--instructions` and `--schema` cannot **both** read from `-` (stdin)
 in one call.
@@ -162,7 +162,7 @@ Streams events, then prints a synthesised answer with numbered sources.
 |------|----------|-------|
 | `--mode fast\|balanced` | no | `fast` (default): quick answers. `balanced`: deeper multi-source. |
 | `--fetch-timeout <sec>` | no | Per-page fetch timeout in seconds (integer). |
-| `--nocache` | no | Force fresh research. |
+| `--no-cache` | no | Force fresh research. |
 
 The query is the positional argument, max **10,000** chars (validated locally).
 Same in-band failure semantics as `automate` (exit `3` on failure).
@@ -216,7 +216,7 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
   shape your schema defines. Don't expect an envelope.
 - **A 4xx rejection (typically 400) means the input was unprocessable** (bad URL, schema, or
   task): exit `3`. Retrying with higher `--effort` will **not** fix it; fix the
-  input. Higher effort/`--nocache` only helps transient fetch problems.
+  input. Higher effort/`--no-cache` only helps transient fetch problems.
 - **Streaming output is NDJSON, not a single JSON document.** Parse per line.
 - **`--timeout` does not apply to `automate`/`research`** (a hard timeout would cut
   the stream). Cancel by killing the process instead.
