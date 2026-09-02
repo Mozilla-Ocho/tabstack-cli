@@ -21,6 +21,33 @@ func isolate(t *testing.T) {
 	})
 }
 
+// TestTimeoutFlagDefault pins the default down: unset means bounded (so a
+// wedged non-streaming call cannot hang forever), and an explicit 0 disables.
+// The "0 disables" half works because both call sites guard on flagTimeout > 0
+// and simply omit client.WithTimeout, so it is worth asserting the default is
+// not itself 0.
+func TestTimeoutFlagDefault(t *testing.T) {
+	isolate(t)
+	root := NewRootCmd()
+	f := root.PersistentFlags().Lookup("timeout")
+	if f == nil {
+		t.Fatal("no --timeout flag registered")
+	}
+	if f.DefValue != defaultTimeout.String() {
+		t.Errorf("--timeout default = %s, want %s", f.DefValue, defaultTimeout)
+	}
+	if defaultTimeout <= 0 {
+		t.Fatal("defaultTimeout must be positive, or nothing is ever bounded")
+	}
+
+	if err := root.PersistentFlags().Parse([]string{"--timeout", "0"}); err != nil {
+		t.Fatal(err)
+	}
+	if flagTimeout != 0 {
+		t.Errorf("--timeout 0 gave %v, want 0 (the disable path)", flagTimeout)
+	}
+}
+
 func TestResolveMode(t *testing.T) {
 	isolate(t)
 	cases := []struct {

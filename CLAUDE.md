@@ -68,6 +68,8 @@ The client splits on transport, not endpoint:
 - **`doJSON`**: single JSON request/response. Used by `extract/json`, `extract/markdown`, `generate/json`, `automate/{id}/input`. Schema-driven endpoints (`extract/json`, `generate/json`) return `json.RawMessage` verbatim because the response shape is caller-defined by the supplied JSON schema.
 - **`doStream`**: Server-Sent Events. Used by `automate` and `research`. Deliberately imposes **no** client timeout (a hard timeout would cut the stream); cancellation flows through `context`. `--timeout` only affects non-streaming calls.
 
+`client.WithTimeout` stores the duration on the `Client` and **only `doJSON` applies it**, via `context.WithTimeout`. It must never become an `http.Client.Timeout`: that bounds reading the response body too, so it would cut every SSE stream off at the deadline (it did, until fixed). Keeping it off the `http.Client` is also what lets it compose with `WithHTTPClient`/`WithDebug` in any order. `--timeout` defaults to `defaultTimeout` (2m, `cmd/root.go`) so a wedged request cannot hang forever; `--timeout 0` disables it, which the `flagTimeout > 0` guards in `cmd/root.go` and `cmd/mcp.go` implement by simply not passing the option.
+
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
 
 ### Debug flag

@@ -38,6 +38,12 @@ type app struct {
 	orgOverride string
 }
 
+// defaultTimeout bounds non-streaming calls so a wedged request eventually
+// fails instead of hanging forever. It is deliberately generous: extract and
+// generate against a heavy page are legitimately slow. Streaming calls are
+// never bounded by it (see client.WithTimeout), and `--timeout 0` disables it.
+const defaultTimeout = 120 * time.Second
+
 // persistent flag values, bound on the root command.
 var (
 	flagAPIKey  string
@@ -87,7 +93,7 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
-	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	pf.DurationVar(&flagTimeout, "timeout", defaultTimeout, "request timeout for non-streaming calls; 0 disables (e.g. 30s)")
 	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
