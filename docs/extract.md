@@ -30,6 +30,7 @@ markup noise.
 | Flag | Meaning |
 |---|---|
 | `--metadata` | include the page's title, author, site name, and similar |
+| `--raw` | print only the Markdown body: no header, no styling, no JSON envelope, in either mode |
 | `--effort min\|standard\|max` | how hard to work at fetching; validated locally |
 | `--geo <CC>` | fetch via an exit node in this country, ISO 3166-1 alpha-2 (e.g. `GB`), validated locally |
 | `--no-cache` | bypass the cache and fetch fresh (`--nocache` is a hidden alias) |
@@ -48,7 +49,10 @@ tabstack extract markdown https://example.com --metadata
 # Skip the cache, fetch via a UK exit node, work harder at it
 tabstack extract markdown https://example.com --no-cache --geo GB --effort max
 
-# Save just the Markdown body to a file
+# Save the Markdown itself to a file
+tabstack extract markdown https://example.com --raw > page.md
+
+# The same, without the flag, by reading the field out of the envelope
 tabstack extract markdown https://example.com | jq -r .content > page.md
 ```
 
@@ -66,6 +70,23 @@ is set. JSON mode emits the full response object:
 ```
 
 `metadata` is present only with `--metadata`.
+
+### `--raw`
+
+Output mode auto-detects, so a plain `> page.md` is not a terminal and writes
+the envelope above into a file named `.md`. `--raw` is the escape hatch: it
+prints `content` and nothing else, **ignoring the output mode**, with exactly
+one trailing newline so redirects and `$(...)` capture both behave.
+
+```bash
+tabstack extract markdown https://example.com --raw > page.md
+tabstack extract markdown https://example.com --raw | pbcopy
+```
+
+`--raw` with `--metadata` is a contradiction and fails with exit `2`. `-o pretty`
+is not a substitute: it still prepends the styled metadata header. The JSON
+envelope is deliberately unchanged, so anything already parsing it keeps
+working.
 
 ---
 

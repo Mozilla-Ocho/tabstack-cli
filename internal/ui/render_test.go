@@ -297,3 +297,82 @@ func TestPrintMarkdownJSON(t *testing.T) {
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
+
+// TestPrintRaw covers the newline contract and mode-independence. --raw exists
+// so `> page.md` yields Markdown rather than a JSON envelope, so consulting the
+// output mode here would reintroduce the exact bug it fixes.
+func TestPrintRaw(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"adds the trailing newline", "# Body", "# Body\n"},
+		{"keeps a single trailing newline", "# Body\n", "# Body\n"},
+		{"collapses several trailing newlines", "# Body\n\n\n", "# Body\n"},
+		{"preserves interior blank lines", "a\n\nb", "a\n\nb\n"},
+		{"empty content writes nothing", "", ""},
+		{"whitespace-only body is kept", "   ", "   \n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []OutputMode{ModePretty, ModeJSON} {
+				r, out, _ := newTestRenderer(mode)
+				if err := r.PrintRaw(tc.body); err != nil {
+					t.Fatal(err)
+				}
+				if got := out.String(); got != tc.want {
+					t.Errorf("mode %s: got %q, want %q", mode, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestPrintRawEmitsNoEnvelope guards the whole point of the flag: no JSON, no
+// styling, no metadata, whatever the mode.
+func TestPrintRawEmitsNoEnvelope(t *testing.T) {
+	for _, mode := range []OutputMode{ModePretty, ModeJSON} {
+		r, out, errBuf := newTestRenderer(mode)
+		if err := r.PrintRaw("# Heading\n\nbody text"); err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if strings.ContainsAny(got, "{}") {
+			t.Errorf("mode %s: raw output looks like JSON: %q", mode, got)
+		}
+		if strings.Contains(got, "\x1b[") {
+			t.Errorf("mode %s: raw output carries ANSI styling: %q", mode, got)
+		}
+		if got != "# Heading\n\nbody text\n" {
+			t.Errorf("mode %s: got %q", mode, got)
+		}
+		if errBuf.String() != "" {
+			t.Errorf("mode %s: raw wrote to stderr: %q", mode, errBuf.String())
+		}
+	}
+}
+
+// TestPrintMarkdownJSONEnvelopeUnchanged pins the envelope: --raw is the escape
+// hatch, so scripts already parsing this shape must keep working.
+func TestPrintMarkdownJSONEnvelopeUnchanged(t *testing.T) {
+	r, out, _ := newTestRenderer(ModeJSON)
+	resp := client.ExtractMarkdownResponse{
+		Content:  "# Body",
+		URL:      "https://example.com",
+		Metadata: &client.Metadata{Title: "T"},
+	}
+	if err := r.PrintMarkdown(resp); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &got); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	for _, key := range []string{"content", "url", "metadata"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("envelope lost the %q key: %v", key, got)
+		}
+	}
+}

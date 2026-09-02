@@ -76,6 +76,7 @@ Non-streaming. Single JSON response.
 | `--effort min\|standard\|max` | no | Fetch effort, default `standard`. See table below. |
 | `--geo <CC>` | no | ISO 3166-1 alpha-2 country, e.g. `GB`. |
 | `--metadata` | no | Include page metadata (title, author, …) in the response. |
+| `--raw` | no | Print **only** `content`, no envelope, no header, in either mode. Mutually exclusive with `--metadata` (exit `2`). |
 | `--no-cache` | no | Bypass cache, fetch fresh. |
 
 Output (`-o json`):
@@ -84,9 +85,14 @@ Output (`-o json`):
 ```
 `metadata` is present only when `--metadata` was passed.
 
+With `--raw` there is **no JSON envelope in either mode**: stdout is the Markdown
+body followed by exactly one newline. Use it when writing a file; use the
+envelope when you need `url` or `metadata` alongside the content.
+
 Example:
 ```bash
 tabstack -o json extract markdown https://example.com --metadata
+tabstack extract markdown https://example.com --raw > page.md
 ```
 
 ### `extract json <url> --schema …`: page → schema-shaped JSON
@@ -228,6 +234,9 @@ Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
 
 - **`extract json` / `generate json` never wrap the result.** You get exactly the
   shape your schema defines. Don't expect an envelope.
+- **`extract markdown` does wrap the result**, unlike the two above: `-o json`
+  gives `{"content":…}`, so a bare `> page.md` writes JSON. Pass `--raw` for the
+  Markdown alone, or read `.content` from the envelope.
 - **A 4xx rejection (typically 400) means the input was unprocessable** (bad URL, schema, or
   task): exit `3`. Retrying with higher `--effort` will **not** fix it; fix the
   input. Higher effort/`--no-cache` only helps transient fetch problems.

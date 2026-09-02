@@ -271,6 +271,9 @@ Run `tabstack <command> --help` for the full flag list on any command.
 # Convert a page to clean Markdown (add --metadata for title/author/etc.)
 tabstack extract markdown https://example.com --metadata
 
+# Write the Markdown itself to a file (--raw skips the JSON envelope)
+tabstack extract markdown https://example.com --raw > page.md
+
 # Extract structured data shaped by a JSON schema
 tabstack extract json https://example.com --schema @schema.json
 tabstack extract json https://example.com --schema '{"type":"object","properties":{"title":{"type":"string"}}}'
@@ -469,12 +472,46 @@ Output is **pretty** (styled, human-readable) on a terminal and **JSON** when
 piped, so it composes with tools like `jq` without a flag:
 
 ```bash
-tabstack extract markdown https://example.com | jq .
+tabstack extract markdown https://example.com | jq -r .content
 ```
+
+Note what that example implies: piping `extract markdown` gives you the **JSON
+response envelope**, not the Markdown. `.content` is the Markdown; `.url` and
+`.metadata` sit alongside it.
 
 Force a mode with `-o/--output pretty|json`, or disable colour with `--no-color`
 (or the `NO_COLOR` env var). Streaming commands (`automate`, `research`) emit one
 NDJSON line per event in JSON mode.
+
+### Getting Markdown into a file
+
+Because the mode auto-detects, a plain redirect is not a terminal and so writes
+the JSON envelope into your `.md` file:
+
+```bash
+tabstack extract markdown https://example.com > page.md   # this is JSON, not Markdown
+```
+
+Pass **`--raw`** to print the document body and nothing else: no metadata
+header, no styling, no envelope, in either output mode.
+
+```bash
+tabstack extract markdown https://example.com --raw > page.md
+tabstack extract markdown https://example.com --raw | pbcopy
+body=$(tabstack extract markdown https://example.com --raw)
+```
+
+If you would rather not learn a flag, pull the field out of the envelope
+instead. The two are equivalent:
+
+```bash
+tabstack extract markdown https://example.com | jq -r .content > page.md
+```
+
+`--raw` emits exactly one trailing newline, so a redirect yields a well-formed
+text file and `$(...)` capture behaves. It cannot be combined with `--metadata`,
+which would contradict it; that fails with exit `2`. `-o pretty` is not a
+substitute, because it still prepends the styled metadata header.
 
 **Every command honours `--output`**, not just the ones that fetch. `auth`,
 `keys`, `config`, and `schema` all emit structured objects, so account and

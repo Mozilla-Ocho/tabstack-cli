@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
 // rtFunc adapts a function to http.RoundTripper.
@@ -226,5 +228,87 @@ func TestNoCacheAliases(t *testing.T) {
 	}
 	if fs.Lookup("no-cache").Hidden {
 		t.Error("--no-cache should be the visible spelling")
+	}
+}
+
+// TestExtractMarkdownRaw covers the flag end to end. The bug it fixes is that
+// `> page.md` resolves to JSON mode and writes an envelope into a .md file, so
+// the mode-independence assertion is the important one here.
+func TestExtractMarkdownRaw(t *testing.T) {
+	const body = "# Example Domain\n\nThis domain is for use in examples."
+
+	cases := []struct {
+		name string
+		mode ui.OutputMode
+	}{
+		{"json mode (the redirect case)", ui.ModeJSON},
+		{"pretty mode", ui.ModePretty},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{"content":` + strconv.Quote(body) + `,"url":"https://example.com"}`
+			out := setTestAppWithClient(t, mockClient(200, payload))
+			rootApp.renderer.Mode = tc.mode
+
+			cmd := newExtractMarkdownCmd()
+			if err := cmd.Flags().Set("raw", "true"); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.RunE(cmd, []string{"https://example.com"}); err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+
+			got := out.String()
+			if got != body+"\n" {
+				t.Errorf("got %q, want %q", got, body+"\n")
+			}
+			if strings.Contains(got, `"content"`) {
+				t.Errorf("raw output contains the JSON envelope: %q", got)
+			}
+			if n := strings.Count(got, "\n") - strings.Count(strings.TrimRight(got, "\n"), "\n"); n != 1 {
+				t.Errorf("want exactly one trailing newline, got %d in %q", n, got)
+			}
+		})
+	}
+}
+
+// TestExtractMarkdownRawRejectsMetadata: the two flags contradict each other,
+// so the command refuses with exit 2 and names both rather than silently
+// dropping one.
+func TestExtractMarkdownRawRejectsMetadata(t *testing.T) {
+	setTestAppWithClient(t, mockClient(200, `{"content":"x"}`))
+
+	cmd := newExtractMarkdownCmd()
+	for _, f := range []string{"raw", "metadata"} {
+		if err := cmd.Flags().Set(f, "true"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := cmd.RunE(cmd, []string{"https://example.com"})
+	if err == nil {
+		t.Fatal("combining --raw and --metadata was accepted")
+	}
+	if got := codeOf(err); got != 2 {
+		t.Errorf("exit code = %d, want 2", got)
+	}
+	for _, want := range []string{"--raw", "--metadata"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message does not name %s: %v", want, err)
+		}
+	}
+}
+
+// TestExtractMarkdownWithoutRawKeepsEnvelope pins the default: --raw is opt-in,
+// so existing scripts that parse the piped envelope are unaffected.
+func TestExtractMarkdownWithoutRawKeepsEnvelope(t *testing.T) {
+	out := setTestAppWithClient(t, mockClient(200, `{"content":"# Body","url":"https://e"}`))
+	cmd := newExtractMarkdownCmd()
+	if err := cmd.RunE(cmd, []string{"https://e"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out.String(), `"content"`) {
+		t.Errorf("default output lost the envelope: %q", out.String())
 	}
 }

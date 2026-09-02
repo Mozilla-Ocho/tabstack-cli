@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 
 	"github.com/spf13/cobra"
 
@@ -28,12 +29,13 @@ func newExtractMarkdownCmd() *cobra.Command {
 		geo      string
 		metadata bool
 		nocache  bool
+		raw      bool
 	)
 
 	cmd := &cobra.Command{
 		Use:     "markdown <url>",
 		Short:   "Convert a URL's content to clean Markdown",
-		Example: "  # Clean Markdown for a page\n  tabstack extract markdown https://example.com\n\n  # Include the title, author, and other page metadata\n  tabstack extract markdown https://example.com --metadata\n\n  # Skip the cache, fetch via a UK exit node, work harder at it\n  tabstack extract markdown https://example.com --no-cache --geo GB --effort max\n\n  # Save the Markdown to a file (JSON when piped, so ask for the field)\n  tabstack extract markdown https://example.com | jq -r .content > page.md",
+		Example: "  # Clean Markdown for a page\n  tabstack extract markdown https://example.com\n\n  # Include the title, author, and other page metadata\n  tabstack extract markdown https://example.com --metadata\n\n  # Skip the cache, fetch via a UK exit node, work harder at it\n  tabstack extract markdown https://example.com --no-cache --geo GB --effort max\n\n  # Save the Markdown itself to a file (without --raw a redirect gets JSON)\n  tabstack extract markdown https://example.com --raw > page.md\n\n  # Same thing without the flag, by pulling the field out of the envelope\n  tabstack extract markdown https://example.com | jq -r .content > page.md",
 		Args:    exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validURL(args[0]); err != nil {
@@ -41,6 +43,12 @@ func newExtractMarkdownCmd() *cobra.Command {
 			}
 			if err := validFetchFlags(effort, geo); err != nil {
 				return withCode(2, err)
+			}
+			// --raw is defined as "the document body and nothing else", so a
+			// metadata header would contradict it. Refuse rather than silently
+			// dropping whichever flag the user meant.
+			if raw && metadata {
+				return withCode(2, errors.New("cannot combine --raw with --metadata: --raw prints the document body only"))
 			}
 			req := client.ExtractMarkdownRequest{
 				URL:       args[0],
@@ -54,6 +62,9 @@ func newExtractMarkdownCmd() *cobra.Command {
 			if err != nil {
 				return classifyError(err)
 			}
+			if raw {
+				return rootApp.renderer.PrintRaw(resp.Content)
+			}
 			return rootApp.renderer.PrintMarkdown(resp)
 		},
 	}
@@ -63,6 +74,7 @@ func newExtractMarkdownCmd() *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("effort", fixedCompletions("min", "standard", "max"))
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&metadata, "metadata", false, "include extracted page metadata")
+	f.BoolVar(&raw, "raw", false, "print only the Markdown body, no header or JSON envelope (for redirecting to a file)")
 	addNoCacheFlag(f, &nocache)
 
 	return cmd
