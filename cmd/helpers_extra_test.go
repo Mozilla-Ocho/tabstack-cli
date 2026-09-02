@@ -23,13 +23,13 @@ func TestWithCodeNil(t *testing.T) {
 }
 
 func TestReadJSONFileMissing(t *testing.T) {
-	if _, err := readJSON("@/no/such/file.json"); err == nil {
+	if _, err := readJSON("@/no/such/file.json", "--schema"); err == nil {
 		t.Error("expected error for missing @file")
 	}
 }
 
 func TestReadInputFileMissingError(t *testing.T) {
-	if _, err := readInput("@/no/such/file"); err == nil {
+	if _, err := readInput("@/no/such/file", "--schema"); err == nil {
 		t.Error("expected error for missing @file")
 	}
 }

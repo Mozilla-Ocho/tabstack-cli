@@ -29,9 +29,10 @@ const defaultConcurrency = 4
 // room for the hash and extension inside every filesystem's limit.
 const maxOutputNameBase = 100
 
-// stdinReader is where a "-" URL list is read from. A package var so the whole
-// path is testable without a real pipe, matching how login.go makes openBrowser
-// swappable.
+// stdinReader is where every "-" input is read from: a URL list here, and the
+// --schema, --instructions, and --data values in helpers.go. A package var so
+// the whole path is testable without a real pipe, matching how login.go makes
+// openBrowser swappable.
 var stdinReader io.Reader = os.Stdin
 
 // batchError is a per-URL failure, carrying the exit code the same failure
@@ -85,6 +86,9 @@ func resolveURLs(args []string, stdinTaken string) ([]string, error) {
 			return nil, withCode(2, fmt.Errorf(
 				"cannot read both the URL list and %s from stdin; pass %s as a literal string or @file",
 				stdinTaken, stdinTaken))
+		}
+		if err := requirePipedStdin("the URL list", "Pipe a newline-delimited list in, or pass the URLs as arguments"); err != nil {
+			return nil, err
 		}
 		lines, err := readURLList(stdinReader)
 		if err != nil {

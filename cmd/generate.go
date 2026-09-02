@@ -57,7 +57,7 @@ func newGenerateJSONCmd() *cobra.Command {
 						"pass one as a literal string or @file",
 				))
 			}
-			instr, err := readInput(instructions)
+			instr, err := readInput(instructions, "--instructions")
 			if err != nil {
 				return withCode(2, err)
 			}

@@ -417,3 +417,6 @@ drift between releases. Branch on the code, never on the message.
   Always pass `--yes` when driving them non-interactively.
 - **`agent input` is unreachable without `--interactive`** on the original run.
 - **One stdin per call.** At most one `-` flag per invocation.
+- **`-` requires an actual pipe.** Passing `-` when stdin is a terminal is exit
+  `2`, not a wait: `tabstack extract json URL --schema -` with nothing piped
+  fails immediately rather than hanging.

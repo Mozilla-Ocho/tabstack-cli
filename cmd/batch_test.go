@@ -15,12 +15,22 @@ import (
 	"time"
 )
 
-// withStdin points the "-" URL list at a string for the duration of a test.
+// withStdin points every "-" input at a string for the duration of a test, and
+// declares stdin non-interactive so the terminal guard lets the read through.
 func withStdin(t *testing.T, content string) {
 	t.Helper()
-	prev := stdinReader
+	prevReader, prevTTY := stdinReader, stdinIsTerminal
 	stdinReader = strings.NewReader(content)
-	t.Cleanup(func() { stdinReader = prev })
+	stdinIsTerminal = func() bool { return false }
+	t.Cleanup(func() { stdinReader, stdinIsTerminal = prevReader, prevTTY })
+}
+
+// withInteractiveStdin declares stdin a terminal, for the refusal path.
+func withInteractiveStdin(t *testing.T) {
+	t.Helper()
+	prev := stdinIsTerminal
+	stdinIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stdinIsTerminal = prev })
 }
 
 func TestReadURLList(t *testing.T) {

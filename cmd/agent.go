@@ -224,7 +224,7 @@ func newAutomateCmd() *cobra.Command {
 
 			// --data is optional freeform JSON context.
 			if dataSpec != "" {
-				raw, err := readJSON(dataSpec)
+				raw, err := readJSON(dataSpec, "--data")
 				if err != nil {
 					return withCode(2, err)
 				}
@@ -341,7 +341,7 @@ func newInputCmd() *cobra.Command {
 			if dataSpec == "" {
 				return withCode(2, fmt.Errorf("the --data flag is required: a JSON object with \"fields\", or {\"cancelled\":true}"))
 			}
-			raw, err := readJSON(dataSpec)
+			raw, err := readJSON(dataSpec, "--data")
 			if err != nil {
 				return withCode(2, err)
 			}

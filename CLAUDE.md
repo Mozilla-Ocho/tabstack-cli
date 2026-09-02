@@ -171,7 +171,9 @@ Redaction is not mode-dependent: `config show` and `auth status` emit previews v
 
 ### Input ergonomics
 
-`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
+`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. They take the flag name as a second argument purely so a failure can say which part of the command to change.
+
+Reads go through the `stdinReader` package var, never `os.Stdin` directly, and every `-` path is gated by `requirePipedStdin`. Without that gate, `-` on an interactive terminal blocked forever with **no output at all**, so a forgotten pipe looked like a frozen shell rather than a mistake; it is now exit 2 naming the flag. `stdinIsTerminal` is a package var too, so both branches are testable without a pty (`TestStdinGuardRefusesATerminal`). Only one input per invocation may read stdin, which `resolveURLs` enforces against the URL list. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
 
 `warnUnlikelySchema` goes one step further for schemas specifically: a JSON object carrying none of the keywords in `schemaShapeKeywords` probably describes example values (`{"title":"string"}`) rather than a shape, which is the commonest first mistake and otherwise surfaces only as an API 400. It is called from `resolveSchemaArg`, **not** `readJSON`, because `readJSON` also backs `--data`, where schema advice would be wrong. It is a hint and never an error: schemas are server-validated, so a local heuristic must not block a request that would have worked. It writes to `warnWriter()` (stderr, or `io.Discard` when `rootApp` is unset) and cannot touch stdout or the exit code. The keyword set is deliberately wider than `type`/`properties` so `$ref`, `enum`, and `oneOf` schemas do not cry wolf.
 

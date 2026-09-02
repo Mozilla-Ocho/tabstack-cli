@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,14 +18,14 @@ import (
 )
 
 func TestReadInputLiteral(t *testing.T) {
-	got, err := readInput("hello")
+	got, err := readInput("hello", "--schema")
 	if err != nil || got != "hello" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
 func TestReadInputEmpty(t *testing.T) {
-	got, err := readInput("")
+	got, err := readInput("", "--schema")
 	if err != nil || got != "" {
 		t.Fatalf("got %q, %v", got, err)
 	}
@@ -36,41 +37,84 @@ func TestReadInputFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("file contents"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readInput("@" + path)
+	got, err := readInput("@"+path, "--schema")
 	if err != nil || got != "file contents" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
 func TestReadInputFileMissing(t *testing.T) {
-	_, err := readInput("@/no/such/file/here")
+	_, err := readInput("@/no/such/file/here", "--schema")
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
 }
 
 func TestReadInputStdin(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = orig })
+	// Reads go through the stdinReader package var, not os.Stdin directly, so
+	// that both this path and the terminal guard are testable without a pty.
+	withStdin(t, "piped data")
 
-	go func() {
-		_, _ = w.WriteString("piped data")
-		w.Close()
-	}()
-
-	got, err := readInput("-")
+	got, err := readInput("-", "--schema")
 	if err != nil || got != "piped data" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
+// TestStdinGuardRefusesATerminal is the regression test for a silent hang:
+// reading stdin when nobody is piping blocked forever with no output, so a
+// forgotten pipe looked like a frozen terminal.
+func TestStdinGuardRefusesATerminal(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+		read  func() error
+	}{
+		{"--schema", "--schema", func() error { _, err := readJSON("-", "--schema"); return err }},
+		{"--instructions", "--instructions", func() error { _, err := readInput("-", "--instructions"); return err }},
+		{"--data", "--data", func() error { _, err := readJSON("-", "--data"); return err }},
+		{"URL list", "the URL list", func() error { _, err := resolveURLs([]string{"-"}, ""); return err }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withInteractiveStdin(t)
+
+			done := make(chan error, 1)
+			go func() { done <- tc.read() }()
+
+			select {
+			case err := <-done:
+				if codeOf(err) != 2 {
+					t.Fatalf("exit code = %d, want 2 (err: %v)", codeOf(err), err)
+				}
+				for _, want := range []string{tc.label, "terminal"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("message missing %q: %v", want, err)
+					}
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("blocked on an interactive stdin instead of refusing")
+			}
+		})
+	}
+}
+
+// TestStdinStillReadsWhenPiped is the other half: the guard must not break the
+// ordinary piped case.
+func TestStdinStillReadsWhenPiped(t *testing.T) {
+	withStdin(t, `{"type":"object"}`)
+	got, err := readJSON("-", "--schema")
+	if err != nil {
+		t.Fatalf("piped stdin was refused: %v", err)
+	}
+	if string(got) != `{"type":"object"}` {
+		t.Errorf("got %s", got)
+	}
+}
+
 func TestReadJSONValid(t *testing.T) {
-	got, err := readJSON(`{"a":1}`)
+	got, err := readJSON(`{"a":1}`, "--schema")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,14 +124,14 @@ func TestReadJSONValid(t *testing.T) {
 }
 
 func TestReadJSONInvalid(t *testing.T) {
-	_, err := readJSON(`{not json`)
+	_, err := readJSON(`{not json`, "--schema")
 	if err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
 }
 
 func TestReadJSONEmpty(t *testing.T) {
-	_, err := readJSON("   ")
+	_, err := readJSON("   ", "--schema")
 	if err == nil {
 		t.Fatal("expected error for empty input")
 	}

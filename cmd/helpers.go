@@ -37,7 +37,7 @@ func resolveSchemaArg(schema, schemaName, storage string) (json.RawMessage, erro
 	}
 
 	if schemaName == "" {
-		raw, err := readJSON(schema)
+		raw, err := readJSON(schema, "--schema")
 		if err != nil {
 			return nil, withCode(2, err)
 		}
@@ -355,6 +355,24 @@ func applyGroupBehaviour(cmd *cobra.Command) {
 	}
 }
 
+// stdinIsTerminal reports whether stdin is an interactive terminal. A package
+// var so tests can exercise both branches without a pty.
+var stdinIsTerminal = func() bool { return isatty.IsTerminal(os.Stdin.Fd()) }
+
+// requirePipedStdin refuses to read from a terminal.
+//
+// Reading stdin when nobody is piping anything blocks forever with no output,
+// so `tabstack extract markdown -` with a forgotten pipe looked like a frozen
+// terminal. label names whatever asked for stdin, so the message says which
+// part of the command to change.
+func requirePipedStdin(label, remedy string) error {
+	if !stdinIsTerminal() {
+		return nil
+	}
+	return withCode(2, fmt.Errorf(
+		"cannot read %s from stdin: stdin is a terminal, not a pipe. %s", label, remedy))
+}
+
 // minArgsNamed accepts n or more arguments, the variadic counterpart to
 // exactArgsNamed.
 func minArgsNamed(n int, name string) cobra.PositionalArgs {
@@ -399,12 +417,15 @@ func isTimeoutError(err error) bool {
 // readInput resolves a value that may be a literal string, an @file reference,
 // or "-" for stdin. This is the same ergonomics curl uses for -d, and it keeps
 // large JSON schemas out of the shell. An empty spec returns an empty string.
-func readInput(spec string) (string, error) {
+func readInput(spec, label string) (string, error) {
 	switch {
 	case spec == "":
 		return "", nil
 	case spec == "-":
-		data, err := io.ReadAll(os.Stdin)
+		if err := requirePipedStdin(label, "Pipe the value in, or pass it as a literal string or @file"); err != nil {
+			return "", err
+		}
+		data, err := io.ReadAll(stdinReader)
 		if err != nil {
 			return "", fmt.Errorf("read stdin: %w", err)
 		}
@@ -426,8 +447,8 @@ func readInput(spec string) (string, error) {
 // readJSON resolves an input spec and validates that it is well-formed JSON,
 // returning it as json.RawMessage. We validate up front so a malformed schema
 // fails locally with a clear message instead of as an opaque API 400.
-func readJSON(spec string) (json.RawMessage, error) {
-	raw, err := readInput(spec)
+func readJSON(spec, label string) (json.RawMessage, error) {
+	raw, err := readInput(spec, label)
 	if err != nil {
 		return nil, err
 	}

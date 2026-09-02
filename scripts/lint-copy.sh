@@ -111,7 +111,11 @@ scan 'scrap(e|er|ing)' 'Banned term (scrape/scraper/scraping) in docs; prefer "e
 # whatever gets substituted in, so a message leading with a command path or flag
 # still slips through. Prefer wording that puts a literal word first.
 ACRONYM='API|JSON|URL|ID|HTTP|HTTPS|CLI|MCP|TOML|SSE|OAuth|PKCE|NDJSON|TTY|XDG'
-LEAD="(--|($ACRONYM) |[a-z]+-[a-z]+ )"
+# Each alternative requires a trailing space, so only a leading *word* counts.
+# That distinguishes a usage string or sentence ("--schema and --schema-name
+# are ...") from a bare label passed as an argument ("--data"), which is a
+# single token, never rendered first, and so never title-cased.
+LEAD="(--[a-z][a-z0-9-]* |($ACRONYM) |[a-z]+-[a-z]+ )"
 
 tracked all_go '*.go'
 src_go=()

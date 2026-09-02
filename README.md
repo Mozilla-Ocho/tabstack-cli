@@ -498,6 +498,9 @@ tabstack extract markdown https://a.com https://b.com https://c.com
 tabstack extract json - --schema-name job-posting < urls.txt
 ```
 
+Passing `-` when nothing is piped in is an error rather than a wait, so a
+forgotten pipe fails immediately instead of looking like a hang.
+
 A list on stdin skips blank lines and `#` comments, so it can live in the repo
 with notes in it. Duplicate URLs are fetched once. Every URL is validated before
 any request goes out, so a typo costs nothing.
