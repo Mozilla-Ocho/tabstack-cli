@@ -189,7 +189,9 @@ func NewRootCmd() *cobra.Command {
 // builds a product-API client.
 func addProductFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
-	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API (overrides env and stored keys)")
+	// The warning is on the flag, not only in the README: the person about to
+	// paste a key into a CI script is looking at --help, not the docs.
+	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API; overrides env and stored keys. Visible in shell history and ps, so prefer TABSTACK_API_KEY in CI")
 	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
 	pf.DurationVar(&flagTimeout, "timeout", defaultTimeout, "request timeout for non-streaming calls; 0 disables (e.g. 30s)")
 	pf.IntVar(&flagRetries, "retries", client.DefaultRetries, "retry transient failures (408, 409, 429, 5xx) this many times; 0 disables")

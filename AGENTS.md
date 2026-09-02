@@ -26,9 +26,21 @@ export TABSTACK_API_KEY="<key>"        # preferred for non-interactive use
 export TABSTACK_BASE_URL="<url>"       # override API root
 ```
 
-Key resolution precedence (highest first): `--api-key` flag → `TABSTACK_API_KEY`
-→ config file (`~/.config/tabstack/config.toml`). If no key is found, commands
-that hit the API exit `2` (non-retryable config error) with a clear message.
+Key resolution precedence, highest first:
+
+1. `--api-key` (alias `--key`)
+2. `TABSTACK_API_KEY`
+3. the stored key for a `--org` override, when one is given
+4. the stored key for the active organisation
+5. a pre-organisation key from an old config, only while no org is active
+
+If no key is found, commands that hit the API exit `2` (non-retryable config
+error) with a clear message. A `--org` whose key is not stored is an error
+naming the `keys create` command to run, never a silent fallback to another
+organisation's key.
+
+**Prefer `TABSTACK_API_KEY` over `--api-key`**: a key on the command line is
+visible in shell history and to `ps` while the command runs.
 
 ## Global flags
 
@@ -213,13 +225,87 @@ should pass `--mode balanced` and null-guard `citedPages` before reading it.
 tabstack -o json agent research "latest developments in quantum computing" --mode balanced
 ```
 
-### `auth login` / `auth status`
+### Account and configuration commands
 
-- `auth login`: interactive (prompts for a hidden key) unless `--key <key>` is
-  passed; saves to the config file. **Agents should prefer `TABSTACK_API_KEY`**
-  and skip this entirely.
-- `auth status`: reports whether a key is configured and its source; never
-  prints the key. Works without a key present.
+All of these are non-streaming and honour `-o json`. None of them take
+`--api-key`: they act through the **session**, not an API key.
+
+#### `auth login`
+
+Runs an **OAuth 2.1 authorization code flow with PKCE**, opening a browser and
+waiting on a loopback listener. It does **not** prompt for a key. **Agents
+should set `TABSTACK_API_KEY` and skip this entirely**; on a machine with no
+display it fails and says so.
+
+| Flag | Notes |
+|------|-------|
+| `--api-key-setup create\|existing\|skip` | what to do about an API key after signing in |
+| `--no-key` | alias for `--api-key-setup=skip` |
+| `--org <selector>` | set the key up for this organisation |
+
+#### `auth status`
+
+Who you are, the active org, and **which credential would actually be sent**.
+Never prints a key in full. Works with no key present. JSON shape:
+
+```json
+{"signed_in":true,"email":"…","active_org":"org_…","api_key_stored":true,
+ "api_key_preview":"ts-a…efgh","env_override":false,"config_path":"…"}
+```
+
+#### `auth switch [organisation]` / `auth sessions` / `auth logout`
+
+- `switch`: changes which stored key product commands send. Resolves by exact
+  id, then case-insensitive name, then unique prefix; ambiguity is exit `2`.
+- `sessions`: lists sessions; `--revoke <id>` kills one. **Confirms**, so pass
+  `--yes`.
+- `logout`: revokes this session. `--all` revokes every session on every
+  machine and **confirms**, so pass `--yes`.
+
+#### `keys create` / `list` / `use` / `revoke`
+
+All take `--org <selector>`.
+
+| Command | Notes |
+|---------|-------|
+| `keys create [--name <n>]` | prints the plaintext **once**; JSON carries `api_key`. |
+| `keys list` | previews only, never plaintext. |
+| `keys use [key-id]` | adopt an existing key; sole candidate is taken automatically. |
+| `keys revoke <key-id>` | irreversible, **confirms**; pass `--yes`. |
+
+#### `config show` / `path` / `drop-legacy-key`
+
+Local only, no network.
+
+| Command | Notes |
+|---------|-------|
+| `config show` | every org, secrets redacted in **both** output modes. |
+| `config path` | the config file path; bare in pretty mode, an object under `-o json`. |
+| `config drop-legacy-key` | refuses unless the active org has its own key; `--force` overrides. |
+
+### `schema` commands
+
+Talk to GitHub and the local store, never the product API, so they take no
+`--api-key`, `--base-url`, or `--timeout`. All take `--storage <dir>` to use a
+store other than the default.
+
+| Command | Notes |
+|---------|-------|
+| `schema list [--local] [--refresh]` | library index, or only what is pulled (`--local` is offline). JSON is an array of objects with a `path` key in both cases. |
+| `schema pull [selector...] [--all] [--force]` | selector is a name, a category, or a repo path. A conflicting local edit prompts, and on a non-TTY exits `2` unless `--force`. |
+| `schema status [--local]` | per-schema `up to date`, `modified`, `outdated`, `missing`, `untracked`. |
+| `schema path <name>` | prints the local file path; bare in pretty mode, for scripting. |
+| `schema rm <selector...>` | deletes pulled files and their manifest entries. |
+
+`pull` and `rm` write per-item progress to **stderr**; stdout carries the tally
+(pretty) or a summary object (`-o json`).
+
+### `mcp`
+
+Runs a Model Context Protocol server over **stdio**. stdout is JSON-RPC frames
+only; all diagnostics go to stderr. Not something an agent driving the CLI
+calls: it is the other integration path. Takes `--api-key`, `--base-url`,
+`--auth-url`, `--timeout`, and `--retries`, but not `--org`.
 
 ## Batches (`extract markdown`, `extract json`)
 

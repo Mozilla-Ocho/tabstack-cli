@@ -33,6 +33,7 @@ This domain is for use in illustrative examples in documents...
 - [Commands](#commands)
 - [Command reference](docs/README.md)
 - [Common options](#common-options)
+- [Shell completion](#shell-completion)
 - [Output & scripting](#output--scripting)
 - [Exit codes](#exit-codes)
 - [Using tabstack with AI agents](#using-tabstack-with-ai-agents)
@@ -173,6 +174,10 @@ Resolved in this order, highest precedence first:
 4. the stored key for the active org
 5. a key from a pre-organisation config, only while no org is active
 
+**Prefer the environment variable in CI.** A key passed as `--api-key` lands in
+your shell history and is visible to anyone who can run `ps` on the machine
+while the command is in flight. `TABSTACK_API_KEY` avoids both.
+
 If `TABSTACK_API_KEY` is set it wins, and `auth status` says so explicitly rather
 than showing a stored org key that is not actually being used. If nothing
 resolves, commands exit `2` with guidance.
@@ -241,8 +246,8 @@ it cannot leave you with nothing that works. `--force` overrides that.
 
 | Command | What it does |
 |---------|--------------|
-| `tabstack extract markdown <url>` | Convert a page to clean Markdown |
-| `tabstack extract json <url> --schema …` | Extract structured data shaped by a JSON schema |
+| `tabstack extract markdown <url>...` | Convert one or more pages to clean Markdown |
+| `tabstack extract json <url>... --schema …` | Extract structured data shaped by a JSON schema |
 | `tabstack generate json <url> --instructions … --schema …` | Fetch a page and transform it with AI into your schema |
 | `tabstack agent automate <task> [--url …]` | Run a natural-language browser-automation task (streams) |
 | `tabstack agent research <query>` | Research the web and print a cited report (streams) |
@@ -618,6 +623,44 @@ $ tabstack extract markdown https://example.com --debug
 debug POST 200 359ms  trace=e1923436412e811be9fe229131cb0694  ratelimit=999/1000 (resets in 20s)
 ```
 
+## Shell completion
+
+Completion covers subcommands, enum flag values (`--effort`, `--mode`,
+`--output`, `--api-key-setup`), your organisations (`--org`, `auth switch`), and
+the schema library and local store (`schema pull`, `--schema-name`,
+`schema rm`, `schema path`).
+
+**bash** (needs `bash-completion`):
+
+```bash
+tabstack completion bash > /etc/bash_completion.d/tabstack           # system-wide
+tabstack completion bash > ~/.local/share/bash-completion/completions/tabstack
+```
+
+**zsh** (anywhere on your `$fpath`):
+
+```bash
+tabstack completion zsh > "${fpath[1]}/_tabstack"
+```
+
+If completion is not already enabled, add `autoload -U compinit; compinit` to
+`~/.zshrc` first. Restart your shell afterwards.
+
+**fish**:
+
+```bash
+tabstack completion fish > ~/.config/fish/completions/tabstack.fish
+```
+
+**PowerShell**:
+
+```powershell
+tabstack completion powershell | Out-String | Invoke-Expression
+```
+
+Add that line to your profile to make it permanent. Run
+`tabstack completion <shell> --help` for the per-shell notes.
+
 ## Output & scripting
 
 Output is **pretty** (styled, human-readable) on a terminal and **JSON** when
@@ -707,8 +750,10 @@ These make the CLI scriptable: branch on the exit status to tell a bad request
 from a network failure from an API rejection:
 
 ```bash
-if ! tabstack extract markdown "$url" > out.md; then
-  case $? in
+tabstack extract markdown "$url" --raw > out.md
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  case "$rc" in
     2) echo "check your arguments" ;;
     3) echo "the API rejected the request" ;;
     *) echo "network or runtime error" ;;

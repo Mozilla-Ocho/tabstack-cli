@@ -18,6 +18,10 @@ written down rather than inferred from a sample.
 | [config](config.md) | `config show`, `path`, `drop-legacy-key` | local disk |
 | [mcp](mcp.md) | `mcp` | both |
 
+`cli-page.md` sits alongside these but is **not part of this reference**: it is
+a drop-in replacement for the published page at
+`docs.tabstack.ai/getting-started/cli`, which lives in another repository.
+
 ## Conventions used on these pages
 
 **Two credentials.** A **session** is user scoped, created by `auth login`, and
