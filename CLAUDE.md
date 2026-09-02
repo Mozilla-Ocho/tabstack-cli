@@ -100,6 +100,18 @@ The library index is cached per store in `<store>/.index-cache.json` (`schemas.C
 
 Beyond the schema store, `cmd/helpers.go` supplies `fixedCompletions(...)` for the enum flags (`--effort`, `--mode`, `--output`, `--api-key-setup`) and `completeOrgs` for `--org` and the `auth switch` positional. `completeOrgs` reads the config store only and never calls the management API: completion runs on every tab press, and `--org` is defined to resolve locally anyway.
 
+### Batch input
+
+`cmd/batch.go` holds everything: `extract markdown` and `extract json` take `<url>...`, with a bare `-` expanding a newline-delimited list read from `stdinReader` (a package var, so the path is testable without a pipe, matching `login.go`'s `openBrowser`). Only one thing per invocation may read stdin, so `extract json - --schema -` is exit 2 naming both; the URL list is resolved **before** the schema so the conflict surfaces instead of the list silently arriving empty. Duplicates are dropped, which also stops two workers racing onto one filename.
+
+Every URL is validated up front, so a batch can only end 0 or 3 and a typo never costs a paid request.
+
+`runBatch` bounds concurrency with a semaphore and emits results in **input order** via a sliding window (`flushReady`), not completion order: these commands are aimed at CI, where output gets diffed. Emitting from the window rather than collecting everything first keeps progress visible on a long run. Files are written in the worker, unlocked, so a slow early URL does not hold back everyone else's writes.
+
+**One URL with no batch flags takes the original single-result path, byte for byte**, so existing scripts are unaffected; `--batch` forces the envelope so a wrapper can rely on one shape. `outputFileName` always appends an 8-hex SHA-256 prefix of the URL, making a name a pure function of its URL: adding a URL never renames another file, which is what makes repeat runs idempotent.
+
+`batchOutcome` prints only the per-URL detail and returns the count as the error, so the caller renders the total once rather than both saying it. Exit 3 for any failure, deliberately one code: per-URL detail is already in the output, and two codes for partial failure would be harder to branch on.
+
 ### Cancellation
 
 `cmd/tabstack/main.go` installs one `signal.NotifyContext` (SIGINT, SIGTERM) around the context handed to `fang.Execute`, and every command threads `cmd.Context()` down to its request, so Ctrl-C cancels the call in flight instead of killing the process mid-request. Two `context.Background()` uses survive on purpose: the loopback shutdown in `cmd/login.go` (inheriting cancellation would reset the connection instead of flushing the callback page to the browser) and the completion helper in `cmd/schema.go`, which carries its own short timeout.

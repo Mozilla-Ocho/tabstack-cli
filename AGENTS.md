@@ -76,16 +76,16 @@ exit code, so do not treat its presence as a failure. It fires on `--schema` and
 
 ## Commands
 
-### `extract markdown <url>`: page → clean Markdown
+### `extract markdown <url>...`: page → clean Markdown
 
-Non-streaming. Single JSON response.
+Non-streaming. Single JSON response, or NDJSON for a batch (see **Batches**).
 
 | Flag | Required | Notes |
 |------|----------|-------|
 | `--effort min\|standard\|max` | no | Fetch effort, default `standard`. See table below. |
 | `--geo <CC>` | no | ISO 3166-1 alpha-2 country, e.g. `GB`. Format is checked locally (two ASCII letters, any case); a bad value exits `2` with no request. An empty value means no geotargeting. |
 | `--metadata` | no | Include page metadata (title, author, …) in the response. |
-| `--raw` | no | Print **only** `content`, no envelope, no header, in either mode. Mutually exclusive with `--metadata` (exit `2`). |
+| `--raw` | no | Print **only** `content`, no envelope, no header, in either mode. Mutually exclusive with `--metadata` (exit `2`), and with several URLs unless `--output-dir` is set. |
 | `--no-cache` | no | Bypass cache, fetch fresh. |
 
 Output (`-o json`):
@@ -104,7 +104,7 @@ tabstack -o json extract markdown https://example.com --metadata
 tabstack extract markdown https://example.com --raw > page.md
 ```
 
-### `extract json <url> --schema …`: page → schema-shaped JSON
+### `extract json <url>... --schema …`: page → schema-shaped JSON
 
 Non-streaming. **The response is exactly your schema's shape**, returned verbatim.
 
@@ -220,6 +220,41 @@ tabstack -o json agent research "latest developments in quantum computing" --mod
   and skip this entirely.
 - `auth status`: reports whether a key is configured and its source; never
   prints the key. Works without a key present.
+
+## Batches (`extract markdown`, `extract json`)
+
+Both accept several URLs, or `-` to read a newline-delimited list from stdin
+(blank lines and `#` comments skipped, duplicates dropped).
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--concurrency <n>` | `4` | URLs in flight at once. |
+| `--output-dir <dir>` | unset | One file per URL. Name is `<host-and-path>-<sha8>.<md\|json>`, a pure function of the URL. Existing files refused unless `--force`. |
+| `--batch` | off | Force the envelope for a single URL, so the shape is stable. |
+| `--force` | off | Overwrite files in `--output-dir`. |
+
+**Output shape depends on the URL count**, so pass `--batch` if you want one
+shape unconditionally:
+
+- **one URL, no `--batch`**: exactly the single-result shape documented above.
+- **more than one, or `--batch`**: NDJSON, one envelope per line, in **input
+  order** regardless of completion order:
+  ```json
+  {"url":"https://a.com","ok":true,"result":{…}}
+  {"url":"https://b.com","ok":false,"error":{"code":3,"message":"api error (404): Not Found"}}
+  ```
+  `error.code` is the exit code that failure would have produced alone, so an
+  API rejection (`3`) is distinguishable from a network problem (`1`) without
+  parsing the message.
+
+**Exit codes for a batch**: `0` only if every URL succeeded, otherwise `3`.
+Successful results are still emitted and still written. A local problem (bad
+URL, `-` competing with `--schema -`, `--raw` with several URLs and no
+`--output-dir`) is `2` and happens before any request. All URLs are validated
+up front, so a batch never fails partway with `2`.
+
+**There is no `--continue-on-error`**: continuing is the default and the only
+behaviour. Read the per-URL `ok` field to find what failed.
 
 ## Effort levels (`extract`, `generate`)
 

@@ -469,6 +469,9 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--timeout <dur>` | Request timeout for non-streaming calls (default `2m`); `0` disables |
 | `--retries <n>` | Retry transient failures this many times (default `2`); `0` disables |
 | `--max-duration <dur>` | Bound a whole stream (`agent automate`, `agent research`); unset by default |
+| `--concurrency <n>` | URLs to fetch at once in a batch (default `4`) |
+| `--output-dir <dir>` | Write one file per URL instead of stdout |
+| `--batch` | Always use the per-URL envelope, even for one URL |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
 
 Failures carry their own diagnostics. An exit-3 error keeps the
@@ -478,6 +481,73 @@ organisation scoping, and `429` reports `Retry-After` when the server sent one.
 When the response carried an `x-trace-id`, the error ends with
 `(trace id <id>)`, so the id to quote in a support request is on the failure
 itself rather than only under `--debug`.
+
+### Batches
+
+`extract markdown` and `extract json` take **several URLs**, or `-` to read a
+newline-delimited list from stdin. This is the shape most CI pipelines need, and
+until now everyone wrote the same `xargs` wrapper by hand.
+
+```bash
+tabstack extract markdown https://a.com https://b.com https://c.com
+tabstack extract json - --schema-name job-posting < urls.txt
+```
+
+A list on stdin skips blank lines and `#` comments, so it can live in the repo
+with notes in it. Duplicate URLs are fetched once. Every URL is validated before
+any request goes out, so a typo costs nothing.
+
+**Output.** A single URL prints exactly what it always did, so existing scripts
+are unaffected. Several URLs emit one NDJSON envelope per line, in **input
+order** regardless of which finished first, so the output is diffable:
+
+```json
+{"url":"https://a.com","ok":true,"result":{"content":"# A","url":"https://a.com"}}
+{"url":"https://b.com","ok":false,"error":{"code":3,"message":"api error (404): Not Found"}}
+```
+
+Pass `--batch` to get that envelope even for one URL, so a wrapper script always
+parses one shape.
+
+**Files.** `--output-dir` writes one file per URL as each finishes:
+
+```bash
+tabstack extract markdown - --output-dir ./pages < urls.txt
+# ./pages/example.com_blog_post-1-b2117d83.md
+```
+
+The name is `<host-and-path>-<hash>.<ext>`, where the hash is the first eight
+hex of the URL's SHA-256. It is always present, so a filename is a pure function
+of its URL: adding a URL to the list never renames anyone else's file, which is
+what makes repeat runs idempotent. An existing file is refused unless `--force`
+is given.
+
+`--raw` with more than one URL would run the documents together on stdout, so it
+is refused with exit `2` unless `--output-dir` is set.
+
+**Concurrency** defaults to 4, tunable with `--concurrency`. Retries apply per
+URL, and the jittered backoff is what keeps parallel workers from retrying in
+lockstep after a shared rate limit.
+
+**Exit codes.** `0` only when every URL succeeded, otherwise `3`, with
+successful results still written and a per-URL summary on stderr. A local
+problem (bad URL, flag conflict) is still `2` and happens before any request.
+
+A worked CI step:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Refresh a docs mirror. Exits non-zero if any page failed, but keeps
+# whatever did succeed, so a single dead link does not lose the run.
+if ! tabstack extract markdown - \
+      --output-dir ./mirror --force --concurrency 8 < urls.txt
+then
+  echo "some pages failed; see the summary above" >&2
+  exit 1
+fi
+```
 
 ### Cancelling, and bounding a long run
 

@@ -277,6 +277,18 @@ func exactArgsNamed(names ...string) cobra.PositionalArgs {
 	}
 }
 
+// minArgsNamed is cobra.MinimumNArgs with a message that names what is
+// missing, the variadic counterpart to exactArgsNamed. Same rule about not
+// leading with the command path: fang title-cases the first word.
+func minArgsNamed(n int, name string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) >= n {
+			return nil
+		}
+		return fmt.Errorf("missing %s; run `%s --help`", name, cmd.CommandPath())
+	}
+}
+
 // validResearchMode returns an error if mode is set to an unrecognised value.
 // An empty string is allowed (means "use server default").
 func validResearchMode(mode string) error {

@@ -13,7 +13,7 @@ applies.
 ## extract markdown
 
 ```
-tabstack extract markdown <url> [--flags]
+tabstack extract markdown <url>... [--flags]
 ```
 
 Converts a page to clean Markdown, stripping navigation, boilerplate, and
@@ -23,7 +23,7 @@ markup noise.
 
 | Argument | Required | Meaning |
 |---|---|---|
-| `<url>` | yes | page to fetch; must be `http` or `https`, validated locally before any request |
+| `<url>...` | yes | one or more pages to fetch; each must be `http` or `https`, all validated before any request. `-` reads a newline-delimited list from stdin. See [Batches](#batches). |
 
 ### Flags
 
@@ -93,7 +93,7 @@ working.
 ## extract json
 
 ```
-tabstack extract json <url> [--flags]
+tabstack extract json <url>... [--flags]
 ```
 
 Extracts data from a page into the shape described by a JSON schema. The
@@ -104,7 +104,7 @@ verbatim and never reshapes it.
 
 | Argument | Required | Meaning |
 |---|---|---|
-| `<url>` | yes | page to fetch; must be `http` or `https` |
+| `<url>...` | yes | one or more pages; `-` reads a list from stdin. See [Batches](#batches). |
 
 ### Flags
 
@@ -150,3 +150,72 @@ bytes through unchanged, so the shape is exactly what you asked for.
 `2` if the schema is missing, malformed, names an unpulled schema, or both
 schema flags are given. `3` if the API rejects the request. See the
 [full list](README.md#conventions-used-on-these-pages).
+
+---
+
+## Batches
+
+Both commands accept several URLs, or `-` to read a newline-delimited list from
+stdin. Blank lines and `#` comments are skipped, so a list can be checked into a
+repo. Duplicate URLs are fetched once.
+
+```bash
+tabstack extract markdown https://a.com https://b.com
+tabstack extract json - --schema-name job-posting < urls.txt
+tabstack extract markdown https://first.com - https://last.com < middle.txt
+```
+
+Only one thing per invocation may read stdin, so `extract json - --schema -`
+fails with exit `2` naming the conflict.
+
+### Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--concurrency <n>` | `4` | how many URLs are fetched at once |
+| `--output-dir <dir>` | unset | write one file per URL instead of printing |
+| `--batch` | off | use the envelope even for a single URL |
+| `--force` | off | overwrite existing files in `--output-dir` |
+
+### Output
+
+**One URL and no batch flags: unchanged**, exactly as documented above, so
+existing scripts keep working.
+
+**More than one URL, or `--batch`:** NDJSON, one envelope per line, in **input
+order** whatever order they finish in, so the output is diffable:
+
+```json
+{"url":"https://a.com","ok":true,"result":{"content":"# A","url":"https://a.com"}}
+{"url":"https://b.com","ok":false,"error":{"code":3,"message":"api error (404): Not Found"}}
+```
+
+`error.code` is the exit code that failure would have carried alone. Pretty mode
+prints a styled URL header before each result, with failures inline.
+
+### Files
+
+`--output-dir` writes each result as it completes. The filename is
+`<host-and-path>-<sha8>.<ext>`, for example:
+
+```
+https://example.com/blog/post-1  ->  example.com_blog_post-1-b2117d83.md
+https://example.com/s?q=a        ->  example.com_s-d40dbe50.json
+```
+
+The hash is always present, so a name is a pure function of its URL. Adding a
+URL to the list never renames the others, which makes repeat runs idempotent.
+An existing file is refused unless `--force` is given.
+
+`--raw` with more than one URL and no `--output-dir` is exit `2`: the documents
+would run together on stdout with nothing to separate them.
+
+### Exit codes
+
+`0` only when every URL succeeded, otherwise `3`, with successful results still
+emitted and written and a per-URL summary on stderr. Local problems (a malformed
+URL, a stdin conflict) are exit `2` and happen before any request, so a batch
+never fails partway through with `2`.
+
+Continuing past a failure is the default and the only behaviour; read the `ok`
+field to find what failed.
