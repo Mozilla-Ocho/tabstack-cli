@@ -300,6 +300,7 @@ func newResearchCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&mode, "mode", "", "research mode: fast|balanced")
+	_ = cmd.RegisterFlagCompletionFunc("mode", fixedCompletions("fast", "balanced"))
 	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "fetch timeout per page, in seconds")
 	addNoCacheFlag(f, &nocache)
 

@@ -364,3 +364,37 @@ func validFetchFlags(effort, geo string) error {
 	}
 	return validGeo(geo)
 }
+
+// fixedCompletions returns a completion func offering a static value set. Used
+// for the enum flags (--effort, --mode, --output, --api-key-setup), whose
+// legal values are already spelled out in their help text and validated
+// locally, so leaving them on default file completion helped nobody.
+func fixedCompletions(values ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return values, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+// completeOrgs offers the organisations already in the local config, for --org
+// and `auth switch`. It reads config only and never calls the management API:
+// completion runs on every tab press, and --org is defined to resolve against
+// local config anyway, so a network round trip here would be both slow and
+// wrong. Names are offered alongside ids because both are valid selectors.
+func completeOrgs(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	store, err := newStore()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := store.Load()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var out []string
+	for _, o := range orgRefsFromConfig(cfg) {
+		if o.Name != "" {
+			out = append(out, o.Name)
+		}
+		out = append(out, o.ID)
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}

@@ -70,6 +70,7 @@ func newAuthLoginCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&keySetup, "api-key-setup", "",
 		"what to do about an API key after signing in: create|existing|skip")
+	_ = cmd.RegisterFlagCompletionFunc("api-key-setup", fixedCompletions("create", "existing", "skip"))
 	cmd.Flags().BoolVar(&noKey, "no-key", false, "alias for --api-key-setup=skip")
 	return cmd
 }

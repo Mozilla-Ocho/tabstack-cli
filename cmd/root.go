@@ -98,6 +98,8 @@ func NewRootCmd() *cobra.Command {
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
+	_ = root.RegisterFlagCompletionFunc("org", completeOrgs)
+	_ = root.RegisterFlagCompletionFunc("output", fixedCompletions("pretty", "json"))
 
 	root.AddCommand(
 		newAgentCmd(),

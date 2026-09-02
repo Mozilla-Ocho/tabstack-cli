@@ -20,8 +20,9 @@ func newAuthSwitchCmd() *cobra.Command {
 			"never signs you in again; it selects which stored API key product calls\n" +
 			"use. Pass an organisation id, name, or unique name prefix, or run with no\n" +
 			"argument to pick from a list.",
-		Args:        cobra.MaximumNArgs(1),
-		Annotations: map[string]string{"skipClient": "true"},
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeOrgs,
+		Annotations:       map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
 			if len(args) == 1 {

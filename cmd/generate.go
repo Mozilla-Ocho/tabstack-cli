@@ -99,6 +99,7 @@ func newGenerateJSONCmd() *cobra.Command {
 	f.StringVar(&schemaName, "schema-name", "", "name of a pulled schema to use (see `tabstack schema pull`)")
 	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
+	_ = cmd.RegisterFlagCompletionFunc("effort", fixedCompletions("min", "standard", "max"))
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	addNoCacheFlag(f, &nocache)
 	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)

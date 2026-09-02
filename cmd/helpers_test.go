@@ -292,3 +292,42 @@ func TestExactArgsNamed(t *testing.T) {
 		t.Errorf("message leads with the command path, fang will capitalise it: %q", err)
 	}
 }
+
+func TestFixedCompletions(t *testing.T) {
+	fn := fixedCompletions("min", "standard", "max")
+	got, directive := fn(nil, nil, "")
+	if len(got) != 3 || got[0] != "min" || got[2] != "max" {
+		t.Errorf("values = %v", got)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("directive = %v, want NoFileComp (paths are not valid here)", directive)
+	}
+}
+
+// TestCompleteOrgs checks org completion reads the local config and offers both
+// names and ids, since both are valid selectors. It must not need a session:
+// completion runs on every tab press and --org resolves locally by design.
+func TestCompleteOrgs(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "tabstack"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "tabstack", "config.toml")
+	body := "version = 1\nactive_org = \"org_a\"\n\n[orgs.org_a]\nname = \"Alpha\"\n\n[orgs.org_b]\nname = \"Bravo\"\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, directive := completeOrgs(nil, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("directive = %v, want NoFileComp", directive)
+	}
+	joined := strings.Join(got, " ")
+	for _, want := range []string{"Alpha", "org_a", "Bravo", "org_b"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("completions %v missing %q", got, want)
+		}
+	}
+}

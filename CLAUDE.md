@@ -86,6 +86,8 @@ Pull records provenance in `<store>/.manifest.json` (`schemas.Manifest`): the ca
 
 The library index is cached per store in `<store>/.index-cache.json` (`schemas.CachedIndex`, 1h TTL, `--refresh` to bypass, stale-cache fallback when offline). Both bookkeeping dotfiles are skipped by `ListLocal`. Shell completion for `pull` selectors (from the cached index) and `--schema-name`/`rm`/`path` (from the local store) lives in `cmd/schema.go` and honours a typed `--storage`.
 
+Beyond the schema store, `cmd/helpers.go` supplies `fixedCompletions(...)` for the enum flags (`--effort`, `--mode`, `--output`, `--api-key-setup`) and `completeOrgs` for `--org` and the `auth switch` positional. `completeOrgs` reads the config store only and never calls the management API: completion runs on every tab press, and `--org` is defined to resolve locally anyway.
+
 ### Streaming outcome handling
 
 Streaming endpoints signal failure **in-band** (a `task:completed`/`complete` event with `success:false`, or an `error` event) rather than via HTTP status. `cmd/agent.go`'s `runStream` watches events to capture the final answer and failure state, then the command maps that onto an exit code. The spinner only animates in pretty mode on a real TTY (`os.Stderr`).
