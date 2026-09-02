@@ -3,26 +3,39 @@
 # lint-copy.sh — enforce Tabstack voice rules that are mechanical enough to catch
 # automatically, so they never reach human review:
 #
-#   1. No em dash (U+2014, "—") in user-facing docs or Go source. Use a comma,
-#      colon, or a sentence split instead. En dashes in numeric ranges like
-#      "1-5s" use a plain hyphen and are not affected.
-#   2. No "scrape"/"scraper"/"scraping" in docs. Tabstack does structured
-#      extraction and browser automation; the scraper framing is a third-party
-#      SEO surface this repo is not.
+#   1. No em dash (U+2014, "—") or horizontal bar (U+2015, "―") in user-facing
+#      docs or Go source. Use a comma, colon, or a sentence split instead. The en
+#      dash (U+2013, "–") is deliberately left alone: it is the correct character
+#      for the numeric ranges the docs already use ("~1–5s", "1–100").
+#   2. No "scrape"/"scraper"/"scraping" in docs or Go source. Tabstack does
+#      structured extraction and browser automation; the scraper framing is a
+#      third-party SEO surface this repo is not.
 #
-# Scope: README.md, AGENTS.md, and tracked *.go files. AGENTS.md is linted but
-# CLAUDE.md is not: CLAUDE.md carries machine-facing instructions with intentional
-# em dashes, whereas AGENTS.md is prose held to the same voice as the docs.
+# Scope, by rule:
+#   dashes:      *README.md, *AGENTS.md, *.go
+#   banned term: *.md (CLAUDE.md included), *.go
 #
-# Uses a literal "—" match (not grep -P) so it behaves identically on GNU and
-# BSD/macOS grep, and avoids bash 4 features (mapfile) so it runs on stock macOS
-# bash 3.2.
+# CLAUDE.md is exempt from the dash rule only: it carries machine-facing
+# instructions with intentional em dashes, whereas the other docs are prose held
+# to the voice rules. openapi.yaml is out of scope entirely: it is an export of
+# the server's spec (its prose cites server-side source files), so local edits
+# would be overwritten on the next re-export.
+#
+# Untracked-but-not-ignored files are scanned too (`git grep --untracked`), so a
+# brand new file fails here rather than after `git add` in CI.
+#
+# Uses `git grep` for both the file selection and the match, so pathspecs, NUL
+# safety, and error reporting are git's problem, not the shell's. git grep exits
+# 1 for "no match" and >1 for a real failure, which is what makes this gate fail
+# closed: any git-level error (not a repo, dubious ownership, missing git) exits
+# 2 instead of silently reporting clean.
 #
 # To intentionally allow one of these on a specific line, append the marker
 #   lint-copy: allow
-# inside a trailing comment on that line: "//" for Go, "<!-- ... -->" for
-# Markdown. The marker only counts inside a comment leader, so prose that merely
-# mentions the marker cannot silently exempt itself.
+# inside a comment that is real for that file type: "//" for Go, "<!-- ... -->"
+# for Markdown. A "//" that is part of a URL ("https://") does not count, and a
+# Markdown comment does not exempt a Go line (or the reverse), so prose that
+# merely mentions the marker cannot silently exempt itself.
 
 set -euo pipefail
 
@@ -30,50 +43,63 @@ cd "$(dirname "$0")/.."
 
 fail=0
 
-# strip_allowed drops lines carrying the "lint-copy: allow" escape hatch, but
-# only when the marker sits inside a comment leader ("//" or "<!--"), so a prose
-# line that merely names the marker is still linted.
-strip_allowed() { grep -vE '(//|<!--).*lint-copy: allow' || true; }
+# strip_allowed drops "path:line:content" records carrying the "lint-copy: allow"
+# escape hatch, honouring only the comment syntax that is real for that path's
+# file type.
+strip_allowed() {
+	awk '
+	{
+		p = index($0, ":")
+		path = substr($0, 1, p - 1)
+		rest = substr($0, p + 1)
+		q = index(rest, ":")
+		content = substr(rest, q + 1)
 
-# scan PATTERN DESCRIPTION FILE... — grep FILEs for PATTERN, print DESCRIPTION and
-# the hits (minus allowed lines), and flag failure. No-ops when no files match.
+		allow = 0
+		if (path ~ /\.go$/)
+			allow = (content ~ /(^|[^:])\/\/.*lint-copy: allow/)
+		else if (path ~ /\.md$/)
+			allow = (content ~ /<!--.*lint-copy: allow.*-->/)
+
+		if (!allow)
+			print
+	}'
+}
+
+# scan PATTERN DESCRIPTION PATHSPEC... — search the pathspecs for PATTERN, print
+# DESCRIPTION and the hits (minus allowed lines), and flag failure. Any git-level
+# error aborts with exit 2 rather than passing.
 scan() {
 	local pattern=$1
 	local desc=$2
 	shift 2
-	[ "$#" -gt 0 ] || return 0
-	local m
-	m=$(grep -inHE "$pattern" "$@" 2>/dev/null | strip_allowed || true)
-	if [ -n "$m" ]; then
+	local out status
+	if out=$(git grep --no-color --untracked -I -inE -e "$pattern" -- "$@"); then
+		status=0
+	else
+		status=$?
+	fi
+	if [ "$status" -gt 1 ]; then
+		echo "lint-copy: git grep failed (exit $status) while scanning for: $desc" >&2
+		exit 2
+	fi
+	[ -n "$out" ] || return 0
+	out=$(printf '%s\n' "$out" | strip_allowed)
+	if [ -n "$out" ]; then
 		echo "$desc"
-		echo "$m"
+		echo "$out"
 		fail=1
 	fi
 }
 
-# tracked FILES <- git ls-files GLOB... — collect NUL-delimited tracked paths into
-# the FILES array, so paths with spaces or glob chars survive intact (no word
-# splitting on an unquoted command substitution).
-tracked() {
-	local name=$1
-	shift
-	local f
-	eval "$name=()"
-	while IFS= read -r -d '' f; do
-		eval "$name+=(\"\$f\")"
-	done < <(git ls-files -z "$@")
-}
+# Em dash and horizontal bar: user-facing docs plus Go source (help/error text;
+# neither has any business in Go source anyway).
+scan '—|―' 'Em dash (U+2014) or horizontal bar (U+2015) found; use a comma, colon, or a sentence split:' \
+	'*README.md' '*AGENTS.md' '*.go'
 
-# Em dashes: user-facing docs plus Go source (help/error text; em dashes have no
-# business in Go source anyway).
-tracked em_files 'README.md' 'AGENTS.md' '*.go'
-scan '—' 'Em dash (U+2014) found; use a comma, colon, or a sentence split:' \
-	${em_files[@]+"${em_files[@]}"}
-
-# Banned term: docs only.
-tracked md_files '*.md'
-scan 'scrap(e|er|ing)' 'Banned term (scrape/scraper/scraping) in docs; prefer "extract"/"automate":' \
-	${md_files[@]+"${md_files[@]}"}
+# Banned term: docs plus Go source (command help and error strings are copy too).
+scan 'scrap(e|er|ing)' 'Banned term (scrape/scraper/scraping); prefer "extract"/"automate":' \
+	'*.md' '*.go'
 
 if [ "$fail" -eq 0 ]; then
 	echo "lint-copy: clean"

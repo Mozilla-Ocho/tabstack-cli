@@ -10,16 +10,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make build       # build into ./bin/tabstack (version stamped from `git describe`)
-make install     # install into $GOPATH/bin
+make install     # install into $GOPATH/bin (make install-local for /usr/local/bin, no Go PATH needed)
 make run ARGS="extract markdown --url ..."
-make lint        # gofmt -w . then go vet ./...
+make lint        # gofmt -w . then go vet ./... then scripts/lint-copy.sh
+make lint-copy   # copy lint alone (em dashes, banned terms)
 make test        # go test ./...
+make smoke       # live API smoke test (needs a key; SKIP_AGENT=1 skips the costly calls)
+make smoke-mcp   # MCP stdio handshake (offline; LIVE=1 to call a tool)
+make snapshot    # goreleaser local release build, no publish
 make help        # list all targets
 ```
 
-Version is injected via `-ldflags -X .../cmd.version=$(VERSION)`; `VERSION` comes from `git describe --tags --always --dirty`, falling back to `dev`.
+Single test: `go test ./cmd -run TestResolveSchemaArg -v` (packages are `./cmd`, `./cmd/tabstack`, `./internal/...`). CI runs `go test -race ./...`, so reproduce race failures with `-race`.
 
-Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/vet/build/test on push and PRs (`.github/workflows/ci.yml`). `client.WithHTTPClient` injects a mock `*http.Client` for tests. `scripts/smoke-test.sh` (`make smoke`) exercises every command against the live API.
+Version is injected via `-ldflags -X .../cmd.version=$(VERSION)`; `VERSION` comes from `git describe --tags --always --dirty`, falling back to `dev`. Releases are goreleaser on a `v*` tag (`.goreleaser.yaml`, `.github/workflows/release.yml`).
+
+Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/copy-lint/vet/build/`test -race` on push and PRs (`.github/workflows/ci.yml`). `client.WithHTTPClient` injects a mock `*http.Client` for tests; no unit test makes a live call. `scripts/smoke-test.sh` (`make smoke`) exercises every command against the live API.
 
 ## Architecture
 
@@ -118,3 +124,23 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 - New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`nocache` flag names.
 - `GeoTarget` and `Effort` (`min`/`standard`/`max`) are shared across fetch-based endpoints.
 - Validate caller input locally where the server has known limits (e.g. `maxInstructionsLen = 20000` in `cmd/generate.go`).
+
+### Copy lint (voice rules, enforced in CI)
+
+`scripts/lint-copy.sh` fails the build on two mechanical voice rules, so new help text, error strings, and docs must respect them:
+
+- **No em dash (U+2014) or horizontal bar (U+2015)** in `*README.md`, `*AGENTS.md`, or any `*.go` file (help and error copy). Use a comma, a colon, or two sentences. The **en dash (U+2013) is allowed**: it is the right character for the numeric ranges the docs already use (`~1–5s`, `1–100`). `CLAUDE.md` is deliberately exempt from this rule: it is machine-facing and uses em dashes on purpose.
+- **No scraper-family term** (`scrape`/`scraper`/`scraping`) in any `*.md` (this file included) or `*.go`. <!-- lint-copy: allow --> The product does structured extraction and browser automation; prefer "extract"/"automate".
+
+`openapi.yaml` is out of scope for both rules: it is an export of the server's spec (its prose cites server-side source files), so local edits would be lost on the next re-export.
+
+Escape hatch: append `lint-copy: allow` inside a comment that is real for that file type, `//` for Go and `<!-- -->` for Markdown. A `//` inside a URL does not count, and a Markdown comment does not exempt a Go line (or the reverse).
+
+The lint scans untracked-but-not-ignored files as well as tracked ones, so a brand new file fails locally instead of after `git add` in CI. It runs through `git grep`, which exits 1 for "no match" and >1 for a git-level error, so the script **fails closed**: a broken checkout exits 2 rather than reporting clean. `scripts/lint_copy_test.go` covers the scope, escape-hatch, and fail-closed behaviour under `go test ./...`.
+
+### Docs that must track the code
+
+- **`README.md`**: user-facing command reference.
+- **`AGENTS.md`**: how an LLM agent should drive the CLI (flags, output shapes, exit codes, gotchas). It predates OAuth login, `--org`, `--debug`, `schema`, and `mcp`, so it still describes `auth login` as a key prompt: treat it as needing an update whenever those surfaces change, not as ground truth.
+- **`openapi.yaml`**: the API spec the hand-written client mirrors, exported from the server. Check it before adding a request type; do not hand-edit its copy.
+- **`CONTRIBUTING.md`** points contributors at this file for architecture.
