@@ -129,7 +129,9 @@ func newKeysListCmd() *cobra.Command {
 }
 
 func newKeysRevokeCmd() *cobra.Command {
-	return &cobra.Command{
+	var yes bool
+
+	cmd := &cobra.Command{
 		Use:         "revoke <key-id>",
 		Short:       "Revoke an API key",
 		Args:        exactArgsNamed("<key-id>"),
@@ -143,6 +145,15 @@ func newKeysRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Revoking breaks every service still sending this key, and cannot
+			// be undone, so it is confirmed even though pulling a schema over a
+			// local file is the recoverable case that used to prompt.
+			ok, err := confirmDestructive(r, fmt.Sprintf("revoke API key %s", keyID), yes)
+			if err != nil || !ok {
+				return err
+			}
+
 			if err := c.RevokeAPIKey(cmd.Context(), keyID); err != nil {
 				return classifyConsoleError(err)
 			}
@@ -167,6 +178,9 @@ func newKeysRevokeCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt")
+	return cmd
 }
 
 // targetOrg resolves which organisation a keys command acts on: --org when

@@ -121,5 +121,6 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 - New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`no-cache` flag names (register the last with `addNoCacheFlag`, which also wires the hidden `--nocache` alias).
 - `GeoTarget` and `Effort` (`min`/`standard`/`max`) are shared across fetch-based endpoints.
+- Irreversible **remote** actions (`keys revoke`, `auth logout --all`, `auth sessions --revoke`) go through `confirmDestructive` and take `--yes`. Declining exits 0, matching `schema pull`'s `[q]uit`; a non-TTY without `--yes` is exit 2 naming the flag, never a silent proceed or a hang. `--force` keeps its separate meaning: overwrite a **local** file (`schema pull`).
 - Validate caller input locally where the server has known limits (e.g. `maxInstructionsLen = 20000` in `cmd/generate.go`). `cmd/helpers.go` holds the shared checks: `validEffort`, `validGeo` (alpha-2 only), `validURL` (http/https + host), and `validFetchFlags` which bundles effort and geo for the fetch-based commands.
 - Positional arity uses `exactArgsNamed("<url>")`, not `cobra.ExactArgs`, so the error names the argument instead of saying "accepts 1 arg(s), received 0".

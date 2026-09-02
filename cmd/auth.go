@@ -184,7 +184,10 @@ func checkKeyRevoked(ctx context.Context, r uiRenderer, cfg *config.Config) erro
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	var all bool
+	var (
+		all bool
+		yes bool
+	)
 
 	cmd := &cobra.Command{
 		Use:         "logout",
@@ -199,6 +202,16 @@ func newAuthLogoutCmd() *cobra.Command {
 
 			c, sm := consoleClient()
 			ctx := cmd.Context()
+
+			// Signing this session out is routine and reversible by signing in
+			// again. --all reaches every other machine the user is signed in on,
+			// so that one is confirmed.
+			if all {
+				ok, err := confirmDestructive(r, "revoke every session for your user, on all machines", yes)
+				if err != nil || !ok {
+					return err
+				}
+			}
 
 			var err error
 			if all {
@@ -227,11 +240,15 @@ func newAuthLogoutCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "revoke every session for your user, not just this one")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt for --all")
 	return cmd
 }
 
 func newAuthSessionsCmd() *cobra.Command {
-	var revoke string
+	var (
+		revoke string
+		yes    bool
+	)
 
 	cmd := &cobra.Command{
 		Use:         "sessions",
@@ -246,6 +263,10 @@ func newAuthSessionsCmd() *cobra.Command {
 			ctx := cmd.Context()
 
 			if revoke != "" {
+				ok, err := confirmDestructive(r, fmt.Sprintf("revoke session %s", revoke), yes)
+				if err != nil || !ok {
+					return err
+				}
 				if err := c.RevokeSession(ctx, revoke); err != nil {
 					return classifyConsoleError(err)
 				}
@@ -282,6 +303,7 @@ func newAuthSessionsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&revoke, "revoke", "", "revoke a session by id")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt for --revoke")
 	return cmd
 }
 

@@ -202,6 +202,10 @@ func TestAuthLogoutAllUsesTheSessionsEndpoint(t *testing.T) {
 	if err := cmd.Flags().Set("all", "true"); err != nil {
 		t.Fatal(err)
 	}
+	// --all is confirmed; tests are non-interactive, so take the --yes path.
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("logout --all: %v", err)
 	}
@@ -264,6 +268,9 @@ func TestAuthSessionsRevoke(t *testing.T) {
 	cmd := newAuthSessionsCmd()
 	cmd.SetContext(context.Background())
 	if err := cmd.Flags().Set("revoke", "s2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
 		t.Fatal(err)
 	}
 	if err := cmd.RunE(cmd, nil); err != nil {

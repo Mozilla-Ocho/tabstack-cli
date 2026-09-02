@@ -398,3 +398,33 @@ func completeOrgs(*cobra.Command, []string, string) ([]string, cobra.ShellCompDi
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
+
+// confirmDestructive gates an irreversible remote action behind an explicit
+// yes. what describes the action in the imperative ("revoke key abc123").
+//
+// The risk model was previously inverted: `schema pull` prompted before
+// overwriting a local file you could re-pull in a second, while revoking a key
+// (which breaks every service using it, with no undo) went through silently.
+//
+// Returns (false, nil) when the user declines, which callers treat as success
+// and exit 0, matching how `schema pull`'s [q]uit already behaves. On a
+// non-TTY, refusing is an exit-2 usage error naming --yes rather than a hang:
+// there is nobody to ask, and silently proceeding is the whole problem.
+func confirmDestructive(r uiRenderer, what string, yes bool) (bool, error) {
+	if yes {
+		return true, nil
+	}
+	answer, err := promptChoice(
+		fmt.Sprintf("About to %s. This cannot be undone. Continue? [y/N] ", what), "yn", 'n')
+	if errors.Is(err, errNotTerminal) {
+		return false, withCode(2, fmt.Errorf("cannot confirm on a non-interactive terminal; pass --yes to %s without prompting", what))
+	}
+	if err != nil {
+		return false, withCode(1, err)
+	}
+	if answer != 'y' {
+		fmt.Fprintln(r.Err, "Cancelled, nothing was changed.")
+		return false, nil
+	}
+	return true, nil
+}

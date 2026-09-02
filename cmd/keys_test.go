@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 )
@@ -192,6 +193,9 @@ func TestKeysRevokeClearsTheStoredKey(t *testing.T) {
 
 	cmd := newKeysRevokeCmd()
 	cmd.SetContext(context.Background())
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.RunE(cmd, []string{"k1"}); err != nil {
 		t.Fatalf("keys revoke: %v", err)
 	}
@@ -230,6 +234,9 @@ func TestKeysRevokeUnknownKeyLeavesConfigAlone(t *testing.T) {
 
 	cmd := newKeysRevokeCmd()
 	cmd.SetContext(context.Background())
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.RunE(cmd, []string{"k-other"}); err != nil {
 		t.Fatalf("keys revoke: %v", err)
 	}
@@ -373,5 +380,39 @@ func TestSetupAppUsesLegacyKeyWithoutAnActiveOrg(t *testing.T) {
 	}
 	if rootApp.key.APIKey != "key-legacy" || rootApp.key.Source != config.SourceLegacy {
 		t.Errorf("resolution = %+v", rootApp.key)
+	}
+}
+
+// TestKeysRevokeRefusesWithoutConfirmation is the safety net: revoking is
+// irreversible and breaks every service still sending the key, so on a
+// non-interactive stdin (as here) it must refuse with exit 2 and name --yes,
+// rather than proceeding or hanging on a prompt nobody will answer.
+func TestKeysRevokeRefusesWithoutConfirmation(t *testing.T) {
+	isolate(t)
+	setTestApp(t)
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	flagAuthURL = srv.URL
+	rootApp.cfg.Session = &config.Session{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}
+
+	cmd := newKeysRevokeCmd()
+	cmd.SetContext(context.Background())
+	err := cmd.RunE(cmd, []string{"k1"})
+	if err == nil {
+		t.Fatal("revoke proceeded without confirmation")
+	}
+	if codeOf(err) != 2 {
+		t.Errorf("exit code = %d, want 2", codeOf(err))
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("error does not mention --yes: %v", err)
+	}
+	if called {
+		t.Error("the revoke request was sent despite refusing to confirm")
 	}
 }

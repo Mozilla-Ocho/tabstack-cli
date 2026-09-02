@@ -145,10 +145,17 @@ tabstack keys list --org acme                       # previews only, never plain
 tabstack keys use <key-id>                          # adopt an existing key into this CLI
 tabstack keys use                                   # pick from a list (or the only one)
 tabstack keys revoke <key-id>                       # also clears it from your config
+tabstack keys revoke <key-id> --yes                 # skip the confirmation prompt
 ```
 
 Keys created by the CLI are named `cli-<hostname>` by default, so they are
 legible when you come to revoke one in the console.
+
+Revoking is irreversible and breaks anything still sending that key, so
+`keys revoke`, `auth logout --all`, and `auth sessions --revoke` ask before
+acting. Pass `--yes` to skip the prompt; on a non-interactive terminal they
+refuse with exit 2 rather than proceeding unasked. (`--force`, on
+`schema pull`, is a different thing: it overwrites a local file.)
 
 `keys use` reveals one of the organisation's existing keys and stores it as the
 one this CLI sends, replacing whatever was stored. Pass a key id (from
