@@ -45,8 +45,11 @@ func newGenerateJSONCmd() *cobra.Command {
 			"--instructions and --schema accept a literal string, @file, or - for\n" +
 			"stdin (only one may read stdin per invocation). Alternatively reference a\n" +
 			"schema you pulled with `tabstack schema pull` via --schema-name.",
-		Args: cobra.ExactArgs(1),
+		Args: exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validURL(args[0]); err != nil {
+				return withCode(2, err)
+			}
 			if instructions == "-" && schema == "-" {
 				return withCode(2, fmt.Errorf(
 					"only one flag can read stdin, but --schema and --instructions both got -; "+
@@ -69,7 +72,7 @@ func newGenerateJSONCmd() *cobra.Command {
 				return err
 			}
 
-			if err := validEffort(effort); err != nil {
+			if err := validFetchFlags(effort, geo); err != nil {
 				return withCode(2, err)
 			}
 

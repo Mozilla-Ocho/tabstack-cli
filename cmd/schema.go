@@ -192,7 +192,7 @@ func newSchemaPathCmd() *cobra.Command {
 		Use:               "path <name>",
 		Short:             "Print the local file path of a pulled schema",
 		Annotations:       map[string]string{"skipClient": "true"},
-		Args:              cobra.ExactArgs(1),
+		Args:              exactArgsNamed("<name>"),
 		ValidArgsFunction: completeLocalSchemaNames,
 		Long: "Resolve a pulled schema to its local file path, for scripting:\n" +
 			"  tabstack extract json <url> --schema @\"$(tabstack schema path job-posting)\"",

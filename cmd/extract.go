@@ -32,9 +32,12 @@ func newExtractMarkdownCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "markdown <url>",
 		Short: "Convert a URL's content to clean Markdown",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validEffort(effort); err != nil {
+			if err := validURL(args[0]); err != nil {
+				return withCode(2, err)
+			}
+			if err := validFetchFlags(effort, geo); err != nil {
 				return withCode(2, err)
 			}
 			req := client.ExtractMarkdownRequest{
@@ -79,9 +82,12 @@ func newExtractJSONCmd() *cobra.Command {
 			"Provide the schema inline with --schema (a literal string, @file, or -\n" +
 			"for stdin), or use --schema-name to reference a schema you pulled with\n" +
 			"`tabstack schema pull` (a bare name or full repo path).",
-		Args: cobra.ExactArgs(1),
+		Args: exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validEffort(effort); err != nil {
+			if err := validURL(args[0]); err != nil {
+				return withCode(2, err)
+			}
+			if err := validFetchFlags(effort, geo); err != nil {
 				return withCode(2, err)
 			}
 

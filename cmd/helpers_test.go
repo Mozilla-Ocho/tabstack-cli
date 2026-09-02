@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 )
 
@@ -227,5 +229,66 @@ func TestClassifyErrorTimeout(t *testing.T) {
 	}
 	if strings.Contains(out.Error(), "context deadline exceeded") {
 		t.Errorf("raw Go error leaked into message: %q", out.Error())
+	}
+}
+
+func TestValidGeo(t *testing.T) {
+	for _, ok := range []string{"", "GB", "gb", "us", " DE "} {
+		if err := validGeo(ok); err != nil {
+			t.Errorf("validGeo(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"GBR", "G", "G1", "12", "united kingdom"} {
+		if err := validGeo(bad); err == nil {
+			t.Errorf("validGeo(%q) = nil, want an error", bad)
+		}
+	}
+}
+
+func TestValidURL(t *testing.T) {
+	for _, ok := range []string{
+		"https://example.com",
+		"http://example.com/a/b?c=d",
+		"https://example.com:8443/x",
+	} {
+		if err := validURL(ok); err != nil {
+			t.Errorf("validURL(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"not a url", "example.com", "ftp://example.com", "https://", ""} {
+		if err := validURL(bad); err == nil {
+			t.Errorf("validURL(%q) = nil, want an error", bad)
+		}
+	}
+}
+
+// TestExactArgsNamed checks the messages name the missing argument, and that
+// neither leads with the command path: fang title-cases the first word, which
+// would turn "tabstack extract markdown" into "Tabstack extract markdown".
+func TestExactArgsNamed(t *testing.T) {
+	cmd := &cobra.Command{Use: "markdown <url>"}
+	args := exactArgsNamed("<url>")
+
+	if err := args(cmd, []string{"https://example.com"}); err != nil {
+		t.Fatalf("correct arity rejected: %v", err)
+	}
+
+	err := args(cmd, nil)
+	if err == nil {
+		t.Fatal("missing argument accepted")
+	}
+	if !strings.Contains(err.Error(), "<url>") {
+		t.Errorf("message does not name the argument: %q", err)
+	}
+	if strings.HasPrefix(err.Error(), "markdown") {
+		t.Errorf("message leads with the command path, fang will capitalise it: %q", err)
+	}
+
+	err = args(cmd, []string{"a", "b"})
+	if err == nil {
+		t.Fatal("extra argument accepted")
+	}
+	if strings.HasPrefix(err.Error(), "markdown") {
+		t.Errorf("message leads with the command path, fang will capitalise it: %q", err)
 	}
 }

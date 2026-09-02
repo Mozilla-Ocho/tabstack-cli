@@ -132,7 +132,7 @@ func newKeysRevokeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "revoke <key-id>",
 		Short:       "Revoke an API key",
-		Args:        cobra.ExactArgs(1),
+		Args:        exactArgsNamed("<key-id>"),
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r := rootApp.renderer

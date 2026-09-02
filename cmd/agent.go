@@ -190,8 +190,17 @@ func newAutomateCmd() *cobra.Command {
 			"workflows.\n\n" +
 			"Pass --interactive to let the task pause and request input mid-run; when\n" +
 			"it does, respond with `tabstack agent input <request-id>`.",
-		Args: cobra.ExactArgs(1),
+		Args: exactArgsNamed("<task>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validGeo(geo); err != nil {
+				return withCode(2, err)
+			}
+			// --url is optional; only check it when the caller supplied one.
+			if url != "" {
+				if err := validURL(url); err != nil {
+					return withCode(2, err)
+				}
+			}
 			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
 				return withCode(2, fmt.Errorf("max iterations must be between 1 and 100 (--max-iterations got %d)", maxIter))
 			}
@@ -258,7 +267,7 @@ func newResearchCmd() *cobra.Command {
 		Long: "Search the web, analyse sources, and synthesise an answer to a query.\n\n" +
 			"Progress streams through phases as the research runs. --mode fast\n" +
 			"(default) returns quick answers; balanced does deeper multi-source work.",
-		Args: cobra.ExactArgs(1),
+		Args: exactArgsNamed("<query>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validResearchMode(mode); err != nil {
 				return withCode(2, err)
@@ -308,7 +317,7 @@ func newInputCmd() *cobra.Command {
 			"The --data payload must be a JSON object:\n" +
 			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  to provide values\n" +
 			"  {\"cancelled\":true}                                to decline",
-		Args: cobra.ExactArgs(1),
+		Args: exactArgsNamed("<request-id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
 				return withCode(2, fmt.Errorf("the --data flag is required: a JSON object with \"fields\", or {\"cancelled\":true}"))

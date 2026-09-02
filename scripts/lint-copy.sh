@@ -106,6 +106,10 @@ scan 'scrap(e|er|ing)' 'Banned term (scrape/scraper/scraping) in docs; prefer "e
 # --schema-name, not both"). Mid-string is unaffected and needs no change.
 #
 # Test files are excluded: their assertion messages are not user facing.
+#
+# Known blind spot: a format string starting with a verb ("%s needs ...") hides
+# whatever gets substituted in, so a message leading with a command path or flag
+# still slips through. Prefer wording that puts a literal word first.
 ACRONYM='API|JSON|URL|ID|HTTP|HTTPS|CLI|MCP|TOML|SSE|OAuth|PKCE|NDJSON|TTY|XDG'
 LEAD="(--|($ACRONYM) |[a-z]+-[a-z]+ )"
 

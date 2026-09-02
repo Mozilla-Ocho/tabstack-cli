@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
@@ -193,6 +195,71 @@ func validEffort(effort string) error {
 	}
 }
 
+// validGeo returns an error if geo is set to something that is not an ISO
+// 3166-1 alpha-2 country code. The help text has always promised alpha-2, but
+// nothing checked, so `--geo GBR` cost a round trip to find out. Empty means
+// "no geotargeting" and is allowed.
+func validGeo(geo string) error {
+	geo = strings.TrimSpace(geo)
+	if geo == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(geo) != 2 {
+		return fmt.Errorf("invalid geo %q: use a two-letter ISO 3166-1 alpha-2 country code, e.g. GB", geo)
+	}
+	for _, r := range strings.ToUpper(geo) {
+		if r < 'A' || r > 'Z' {
+			return fmt.Errorf("invalid geo %q: use a two-letter ISO 3166-1 alpha-2 country code, e.g. GB", geo)
+		}
+	}
+	return nil
+}
+
+// validURL checks a URL argument locally so an obvious typo fails immediately
+// instead of costing a request that comes back as an opaque API 400. It only
+// rejects what is certainly wrong: it must parse, carry an http or https
+// scheme, and have a host. Anything past that is the server's call.
+func validURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid url %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		if u.Scheme == "" {
+			return fmt.Errorf("invalid url %q: missing scheme, try https://%s", raw, strings.TrimSpace(raw))
+		}
+		return fmt.Errorf("invalid url %q: scheme must be http or https, got %q", raw, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("invalid url %q: missing host", raw)
+	}
+	return nil
+}
+
+// exactArgsNamed is cobra.ExactArgs with a message that names what is missing.
+// The stock one says "accepts 1 arg(s), received 0", which tells the user the
+// shape of their mistake but not what to type. names lists the positional
+// arguments in order, e.g. "<url>".
+func exactArgsNamed(names ...string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == len(names) {
+			return nil
+		}
+		// These messages deliberately do not lead with cmd.CommandPath(): fang
+		// title-cases the first word, which would print "Tabstack extract ...".
+		// A format string starting with %s hides that from the lint rule, so it
+		// has to be caught by hand here.
+		want := strings.Join(names, " ")
+		switch {
+		case len(args) < len(names):
+			return fmt.Errorf("missing %s; run `%s --help`", want, cmd.CommandPath())
+		default:
+			return fmt.Errorf("too many arguments for `%s`: expected %s, got %d; quote the value if it contains spaces",
+				cmd.CommandPath(), want, len(args))
+		}
+	}
+}
+
 // validResearchMode returns an error if mode is set to an unrecognised value.
 // An empty string is allowed (means "use server default").
 func validResearchMode(mode string) error {
@@ -240,7 +307,9 @@ func readInput(spec string) (string, error) {
 		path := strings.TrimPrefix(spec, "@")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("read %s: %w", path, err)
+			// os.ReadFile's error already names the path, so wrapping with the
+			// path again produced "read /x: open /x: no such file or directory".
+			return "", fmt.Errorf("read input file: %w", err)
 		}
 		return string(data), nil
 	default:
@@ -284,4 +353,14 @@ func addNoCacheFlag(f *pflag.FlagSet, p *bool) {
 	f.BoolVar(p, "no-cache", false, "bypass the cache and fetch fresh")
 	f.BoolVar(p, "nocache", false, "alias for --no-cache")
 	_ = f.MarkHidden("nocache")
+}
+
+// validFetchFlags runs the local checks the fetch-based commands share, so
+// `extract`, `generate`, and `automate` reject the same bad input the same way
+// rather than each spending a round trip to find out.
+func validFetchFlags(effort, geo string) error {
+	if err := validEffort(effort); err != nil {
+		return err
+	}
+	return validGeo(geo)
 }
