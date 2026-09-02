@@ -32,8 +32,12 @@ func newConfigPathCmd() *cobra.Command {
 		Short:       "Print the path of the config file",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			r := rootApp.renderer
+			if jsonMode(r) {
+				return emitJSON(r, pathJSON{Path: rootApp.store.Path()})
+			}
 			// Bare and unstyled: this exists to be substituted into other commands.
-			fmt.Fprintln(rootApp.renderer.Out, rootApp.store.Path())
+			fmt.Fprintln(r.Out, rootApp.store.Path())
 			return nil
 		},
 	}
@@ -48,7 +52,11 @@ func newConfigShowCmd() *cobra.Command {
 			"last four characters, so the output is safe to paste into a bug report.",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			showConfig(rootApp.renderer, rootApp.cfg, rootApp.store.Path())
+			r := rootApp.renderer
+			if jsonMode(r) {
+				return emitJSON(r, configJSON(rootApp.cfg, rootApp.store.Path()))
+			}
+			showConfig(r, rootApp.cfg, rootApp.store.Path())
 			return nil
 		},
 	}
@@ -147,6 +155,98 @@ func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	}
 }
 
+// pathJSON is the object form of `config path`. Pretty mode stays a bare line
+// so it can be substituted into other commands; JSON mode gets a real object
+// so it composes with jq like everything else.
+type pathJSON struct {
+	Path string `json:"path"`
+}
+
+// configShowJSON mirrors what `config show` prints: every org, not just the
+// active one, with every secret redacted. There is no mode that prints a
+// credential in full, and that holds here too.
+type configShowJSON struct {
+	Path        string          `json:"path"`
+	Permissions string          `json:"permissions,omitempty"`
+	Exists      bool            `json:"exists"`
+	PermsOK     bool            `json:"permissions_ok"`
+	Version     int             `json:"version"`
+	Session     *sessionJSON    `json:"session,omitempty"`
+	BaseURL     string          `json:"base_url"`
+	AuthURL     string          `json:"auth_url"`
+	ActiveOrg   string          `json:"active_org,omitempty"`
+	Orgs        []configOrgJSON `json:"orgs"`
+	LegacyKey   string          `json:"legacy_key_preview,omitempty"`
+	LegacyInUse bool            `json:"legacy_key_in_use"`
+	EnvOverride bool            `json:"env_override"`
+}
+
+type sessionJSON struct {
+	Email     string  `json:"email,omitempty"`
+	Preview   string  `json:"access_token_preview"`
+	ExpiresAt *string `json:"expires_at,omitempty"`
+	Expired   bool    `json:"expired"`
+	Scope     string  `json:"scope,omitempty"`
+}
+
+type configOrgJSON struct {
+	ID         string `json:"id"`
+	Name       string `json:"name,omitempty"`
+	Active     bool   `json:"active"`
+	KeyStored  bool   `json:"api_key_stored"`
+	KeyPreview string `json:"api_key_preview,omitempty"`
+	KeyName    string `json:"api_key_name,omitempty"`
+	KeyID      string `json:"api_key_id,omitempty"`
+}
+
+// configJSON builds configShowJSON. It mirrors showConfig's branches; keep the
+// two in step.
+func configJSON(cfg *config.Config, path string) configShowJSON {
+	mode, exists, permsOK := config.PermissionsState(path)
+	out := configShowJSON{
+		Path:        path,
+		Exists:      exists,
+		PermsOK:     permsOK,
+		Version:     cfg.Version,
+		BaseURL:     cfg.ResolveBaseURL(flagBaseURL),
+		AuthURL:     cfg.ResolveAuthURL(flagAuthURL),
+		ActiveOrg:   cfg.ActiveOrg,
+		Orgs:        []configOrgJSON{},
+		EnvOverride: os.Getenv(config.EnvAPIKey) != "",
+	}
+	if exists {
+		out.Permissions = fmt.Sprintf("%#o", mode)
+	}
+	if cfg.Session != nil && cfg.Session.AccessToken != "" {
+		sj := &sessionJSON{
+			Email:   cfg.Session.UserEmail,
+			Preview: config.Redact(cfg.Session.AccessToken),
+			Scope:   cfg.Session.Scope,
+		}
+		if !cfg.Session.ExpiresAt.IsZero() {
+			at := cfg.Session.ExpiresAt.UTC().Format(time.RFC3339)
+			sj.ExpiresAt = &at
+			sj.Expired = time.Until(cfg.Session.ExpiresAt) <= 0
+		}
+		out.Session = sj
+	}
+	for _, o := range orgRefsFromConfig(cfg) {
+		row := configOrgJSON{ID: o.ID, Name: o.Name, Active: o.ID == cfg.ActiveOrg}
+		if org := cfg.Org(o.ID); org != nil && org.APIKey != "" {
+			row.KeyStored = true
+			row.KeyPreview = config.Redact(org.APIKey)
+			row.KeyName = org.APIKeyName
+			row.KeyID = org.APIKeyID
+		}
+		out.Orgs = append(out.Orgs, row)
+	}
+	if cfg.LegacyAPIKey != "" {
+		out.LegacyKey = config.Redact(cfg.LegacyAPIKey)
+		out.LegacyInUse = cfg.ActiveOrg == ""
+	}
+	return out
+}
+
 // orgKeyLine describes one org's stored key without revealing it.
 func orgKeyLine(org *config.OrgCreds) string {
 	if org == nil || org.APIKey == "" {
@@ -178,6 +278,9 @@ func newConfigDropLegacyKeyCmd() *cobra.Command {
 			cfg := rootApp.cfg
 
 			if cfg.LegacyAPIKey == "" {
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "drop_legacy_key", OK: true, Note: "no legacy API key stored"})
+				}
 				fmt.Fprintln(r.Out, "no legacy API key stored, nothing to do")
 				return nil
 			}
@@ -193,6 +296,9 @@ func newConfigDropLegacyKeyCmd() *cobra.Command {
 				return withCode(1, fmt.Errorf("save config: %w", err))
 			}
 
+			if jsonMode(r) {
+				return emitJSON(r, actionJSON{Action: "drop_legacy_key", OK: true, Org: cfg.ActiveOrg})
+			}
 			fmt.Fprintf(r.Out, "%s legacy API key removed from %s\n",
 				r.Styles.Success.Render("✓"), rootApp.store.Path())
 			if cfg.ActiveOrg != "" {

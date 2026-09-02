@@ -20,6 +20,7 @@ import (
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/schemas"
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
 
 // resolveSchemaArg returns the JSON schema bytes for the schema-driven commands
@@ -428,3 +429,19 @@ func confirmDestructive(r uiRenderer, what string, yes bool) (bool, error) {
 	}
 	return true, nil
 }
+
+// emitJSON writes v as one JSON object on stdout. The management and config
+// commands render human text in pretty mode and call this in JSON mode, so
+// `--output json` means the same thing everywhere instead of being a no-op on
+// a third of the tree. The types passed in are declared structs, not ad-hoc
+// maps, so the wire shape is reviewable and stable.
+func emitJSON(r uiRenderer, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return withCode(1, err)
+	}
+	return r.PrintJSON(raw)
+}
+
+// jsonMode reports whether the caller asked for machine-readable output.
+func jsonMode(r uiRenderer) bool { return r.Mode == ui.ModeJSON }

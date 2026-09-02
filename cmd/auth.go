@@ -49,6 +49,10 @@ func newAuthStatusCmd() *cobra.Command {
 			cfg := rootApp.cfg
 			k := r.Styles.Key
 
+			if jsonMode(r) {
+				return emitJSON(r, authStatusJSON(cfg, rootApp.store.Path()))
+			}
+
 			// 1. Identity.
 			if cfg.Session == nil || cfg.Session.AccessToken == "" {
 				fmt.Fprintln(r.Out, r.Styles.Muted.Render("not signed in"))
@@ -154,6 +158,77 @@ func printKeyState(r uiRenderer, cfg *config.Config) {
 	}
 }
 
+// actionJSON is the machine-readable acknowledgement for commands whose pretty
+// output is a single confirmation line. Keeping one shape across them means a
+// script can branch on .ok without learning a type per command.
+type actionJSON struct {
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	ID     string `json:"id,omitempty"`
+	Org    string `json:"org,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// statusJSON is the machine-readable form of `auth status`. Declared rather
+// than assembled from a map so the shape is reviewable in one place and stable
+// for scripts. Secrets stay redacted exactly as in pretty mode: there is no
+// output mode that prints a credential in full.
+type statusJSON struct {
+	SignedIn       bool    `json:"signed_in"`
+	Email          string  `json:"email,omitempty"`
+	SessionExpiry  *string `json:"session_expires_at,omitempty"`
+	SessionExpired bool    `json:"session_expired"`
+	ActiveOrg      string  `json:"active_org,omitempty"`
+	ActiveOrgName  string  `json:"active_org_name,omitempty"`
+	APIKeyStored   bool    `json:"api_key_stored"`
+	APIKeyPreview  string  `json:"api_key_preview,omitempty"`
+	APIKeyName     string  `json:"api_key_name,omitempty"`
+	APIKeyLegacy   bool    `json:"api_key_from_legacy_config"`
+	EnvOverride    bool    `json:"env_override"`
+	ConfigPath     string  `json:"config_path"`
+	ConfigPerms    string  `json:"config_permissions,omitempty"`
+	PermsOK        bool    `json:"config_permissions_ok"`
+}
+
+// authStatusJSON builds statusJSON from config. It mirrors the pretty-mode
+// branches in printKeyState and printExpiry; keep the two in step.
+func authStatusJSON(cfg *config.Config, path string) statusJSON {
+	out := statusJSON{
+		ActiveOrg:   cfg.ActiveOrg,
+		EnvOverride: os.Getenv(config.EnvAPIKey) != "",
+		ConfigPath:  path,
+	}
+	if cfg.ActiveOrg != "" {
+		out.ActiveOrgName = cfg.OrgName(cfg.ActiveOrg)
+	}
+	if cfg.Session != nil && cfg.Session.AccessToken != "" {
+		out.SignedIn = true
+		out.Email = cfg.Session.UserEmail
+		if !cfg.Session.ExpiresAt.IsZero() {
+			at := cfg.Session.ExpiresAt.UTC().Format(time.RFC3339)
+			out.SessionExpiry = &at
+			out.SessionExpired = time.Until(cfg.Session.ExpiresAt) <= 0
+		}
+	}
+	switch {
+	case cfg.ActiveOrg == "" && cfg.LegacyAPIKey != "":
+		out.APIKeyStored = true
+		out.APIKeyLegacy = true
+		out.APIKeyPreview = config.Redact(cfg.LegacyAPIKey)
+	case cfg.ActiveOrg != "" && cfg.HasKey(cfg.ActiveOrg):
+		o := cfg.Org(cfg.ActiveOrg)
+		out.APIKeyStored = true
+		out.APIKeyPreview = config.Redact(o.APIKey)
+		out.APIKeyName = o.APIKeyName
+	}
+	mode, exists, ok := config.PermissionsState(path)
+	out.PermsOK = ok
+	if exists {
+		out.ConfigPerms = fmt.Sprintf("%#o", mode)
+	}
+	return out
+}
+
 // checkKeyRevoked verifies the stored key id still exists for the active org. A
 // key revoked in the console keeps working in config until something asks, and
 // "401 from the API" is a poor way to find out.
@@ -196,6 +271,9 @@ func newAuthLogoutCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
 			if rootApp.cfg.Session == nil || rootApp.cfg.Session.AccessToken == "" {
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "logout", OK: true, Note: "not signed in"})
+				}
 				fmt.Fprintln(r.Out, "not signed in")
 				return nil
 			}
@@ -230,8 +308,13 @@ func newAuthLogoutCmd() *cobra.Command {
 			}
 
 			what := "session revoked"
+			action := "logout"
 			if all {
 				what = "all sessions revoked"
+				action = "logout_all"
+			}
+			if jsonMode(r) {
+				return emitJSON(r, actionJSON{Action: action, OK: true})
 			}
 			fmt.Fprintf(r.Out, "%s %s\n", r.Styles.Success.Render("✓"), what)
 			fmt.Fprintln(r.Out, r.Styles.Muted.Render("stored API keys were left in place; remove them with `tabstack keys revoke <id>`"))
@@ -270,6 +353,9 @@ func newAuthSessionsCmd() *cobra.Command {
 				if err := c.RevokeSession(ctx, revoke); err != nil {
 					return classifyConsoleError(err)
 				}
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "session_revoked", ID: revoke, OK: true})
+				}
 				fmt.Fprintf(r.Out, "%s session %s revoked\n", r.Styles.Success.Render("✓"), revoke)
 				return nil
 			}
@@ -277,6 +363,11 @@ func newAuthSessionsCmd() *cobra.Command {
 			sessions, err := c.Sessions(ctx)
 			if err != nil {
 				return classifyConsoleError(err)
+			}
+			if jsonMode(r) {
+				// Emit the server's own shape: these are already flat records
+				// with json tags, so there is nothing to restate.
+				return emitJSON(r, sessions)
 			}
 			if len(sessions) == 0 {
 				fmt.Fprintln(r.Out, r.Styles.Muted.Render("no active sessions"))

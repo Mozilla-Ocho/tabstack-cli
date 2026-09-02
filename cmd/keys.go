@@ -80,6 +80,18 @@ func newKeysCreateCmd() *cobra.Command {
 	return cmd
 }
 
+// keyListJSON is one row of `keys list`. It is a restatement of console.APIKey
+// rather than that type directly, because APIKey carries an APIKey field: list
+// must never emit plaintext, whatever the server includes in the payload.
+type keyListJSON struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Preview    string  `json:"preview"`
+	Org        string  `json:"org"`
+	Stored     bool    `json:"stored_in_cli"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+}
+
 func newKeysListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "list",
@@ -99,6 +111,20 @@ func newKeysListCmd() *cobra.Command {
 			keys, err := c.ListAPIKeys(cmd.Context(), orgID)
 			if err != nil {
 				return classifyConsoleError(err)
+			}
+			if jsonMode(r) {
+				stored := rootApp.cfg.Org(orgID)
+				out := make([]keyListJSON, 0, len(keys))
+				for _, k := range keys {
+					row := keyListJSON{ID: k.ID, Name: k.Name, Preview: k.Preview, Org: orgID}
+					row.Stored = stored != nil && stored.APIKeyID == k.ID
+					if k.LastUsedAt != nil {
+						at := k.LastUsedAt.UTC().Format(time.RFC3339)
+						row.LastUsedAt = &at
+					}
+					out = append(out, row)
+				}
+				return emitJSON(r, out)
 			}
 			if len(keys) == 0 {
 				fmt.Fprintf(r.Out, "%s\n", r.Styles.Muted.Render(
@@ -157,7 +183,16 @@ func newKeysRevokeCmd() *cobra.Command {
 			if err := c.RevokeAPIKey(cmd.Context(), keyID); err != nil {
 				return classifyConsoleError(err)
 			}
-			fmt.Fprintf(r.Out, "%s revoked key %s\n", r.Styles.Success.Render("✓"), keyID)
+			if jsonMode(r) {
+				// Emitted before the config cleanup below so the object is the
+				// only thing on stdout; the "org now has no key" note is advice,
+				// and goes to stderr in this mode.
+				if err := emitJSON(r, actionJSON{Action: "key_revoked", ID: keyID, OK: true}); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(r.Out, "%s revoked key %s\n", r.Styles.Success.Render("✓"), keyID)
+			}
 
 			// A revoked key left in config would keep being sent until the API
 			// starts rejecting it, so drop it and say which org is now keyless.
@@ -171,7 +206,11 @@ func newKeysRevokeCmd() *cobra.Command {
 				if err := rootApp.store.Save(cfg); err != nil {
 					return withCode(1, fmt.Errorf("save config: %w", err))
 				}
-				fmt.Fprintf(r.Out, "%s %s now has no API key stored. Create one with: tabstack keys create --org %s\n",
+				out := r.Out
+				if jsonMode(r) {
+					out = r.Err
+				}
+				fmt.Fprintf(out, "%s %s now has no API key stored. Create one with: tabstack keys create --org %s\n",
 					r.Styles.ErrorTag.Render("!"), cfg.OrgName(orgID), orgID)
 				break
 			}

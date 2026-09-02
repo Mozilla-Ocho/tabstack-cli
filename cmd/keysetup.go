@@ -124,6 +124,18 @@ func promptKeySetup(r uiRenderer, orgName string, hasExisting bool) (keySetupMod
 
 // createAndStoreKey mints a key, stores it against the organisation, and prints
 // it exactly once.
+// createdKeyJSON is the result of creating or adopting a key. APIKey is set
+// only by creation, the one path where the plaintext is legitimately shown.
+type createdKeyJSON struct {
+	Action  string `json:"action"`
+	OK      bool   `json:"ok"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Org     string `json:"org"`
+	APIKey  string `json:"api_key,omitempty"`
+	Preview string `json:"preview,omitempty"`
+}
+
 func createAndStoreKey(ctx context.Context, c *console.Client, orgID, name string) error {
 	r := rootApp.renderer
 	cfg := rootApp.cfg
@@ -147,6 +159,15 @@ func createAndStoreKey(ctx context.Context, c *console.Client, orgID, name strin
 		return withCode(1, fmt.Errorf("save config: %w", err))
 	}
 
+	if jsonMode(r) {
+		// The plaintext is included here and nowhere else. This is the one
+		// moment the API returns it, and a script creating a key needs it;
+		// pretty mode prints it too. `keys list` and `config show` never do.
+		return emitJSON(r, createdKeyJSON{
+			Action: "key_created", OK: true,
+			ID: key.ID, Name: key.Name, Org: orgID, APIKey: key.APIKey,
+		})
+	}
 	fmt.Fprintf(r.Out, "\n%s created API key %s for %s\n",
 		r.Styles.Success.Render("✓"), key.Name, cfg.OrgName(orgID))
 	fmt.Fprintf(r.Out, "%s\n", r.Styles.Box.Render(key.APIKey))
@@ -197,6 +218,15 @@ func adoptKey(ctx context.Context, c *console.Client, orgID, keyID string) error
 		return withCode(1, fmt.Errorf("save config: %w", err))
 	}
 
+	if jsonMode(r) {
+		// Adoption stores a key the caller already has access to, so the result
+		// is an acknowledgement, not a reveal: preview only.
+		return emitJSON(r, createdKeyJSON{
+			Action: "key_adopted", OK: true,
+			ID: chosen.ID, Name: chosen.Name, Org: orgID,
+			Preview: config.Redact(revealed.APIKey),
+		})
+	}
 	fmt.Fprintf(r.Out, "%s stored existing key %s %s\n", r.Styles.Success.Render("✓"),
 		chosen.Name, r.Styles.Muted.Render(config.Redact(revealed.APIKey)))
 	return nil

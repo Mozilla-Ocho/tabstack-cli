@@ -115,6 +115,14 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 `resolveMode` (root.go): `--output pretty|json` wins; otherwise **pretty on a TTY, JSON when piped**, so `tabstack ... | jq` works without a flag. JSON streams emit NDJSON (one line per event). The renderer never reshapes caller-defined schema results.
 
+**Every command honours the mode.** `auth`, `keys`, `config`, and `switch` used to ignore it entirely and print human text into a pipe. They now branch on `jsonMode(r)` and emit through `emitJSON`, using **declared structs** (`statusJSON`, `configShowJSON`, `keyListJSON`, `createdKeyJSON`, `actionJSON`, `switchJSON`, `pullResult`, `rmResult`) rather than ad-hoc maps, so the wire shape is reviewable in one place. Single-confirmation commands share `actionJSON` so a script can branch on `.ok` without learning a type per command.
+
+Redaction is not mode-dependent: `config show` and `auth status` emit previews via `config.Redact` in JSON exactly as in pretty, the refresh token has no field at all, and `keys list` restates `console.APIKey` precisely so the plaintext it may carry cannot escape. `keys create` is the sole exception and emits `api_key`, because that is the one moment the API returns it and pretty mode prints it too. `TestConfigShowJSONRedactsEverything` guards this.
+
+**stdout is results, stderr is progress.** `schema pull`/`rm` write their per-schema lines to stderr in both modes and keep stdout for the tally (pretty) or the summary object (JSON). `keys revoke`'s "org now has no key" advice likewise moves to stderr under `--output json`.
+
+`schema list --local` emits objects keyed by `path`, matching `schema list`, so `jq '.[].path'` works against either; it previously emitted bare strings, giving one command two shapes.
+
 ### Input ergonomics
 
 `readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.

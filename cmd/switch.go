@@ -149,6 +149,12 @@ func applySwitch(ctx context.Context, c *console.Client, target orgRef) error {
 	}
 
 	name := cfg.OrgName(target.ID)
+	if jsonMode(r) {
+		return emitJSON(r, switchJSON{
+			Action: "switch", OK: true,
+			Org: target.ID, OrgName: name, APIKeyStored: cfg.HasKey(target.ID),
+		})
+	}
 	if cfg.HasKey(target.ID) {
 		fmt.Fprintf(r.Out, "%s now acting as %s (%s), API key in place\n",
 			r.Styles.Success.Render("✓"), name, target.ID)
@@ -157,6 +163,17 @@ func applySwitch(ctx context.Context, c *console.Client, target orgRef) error {
 			r.Styles.Success.Render("✓"), name, target.ID)
 	}
 	return nil
+}
+
+// switchJSON is the machine-readable result of a switch. It carries the key
+// state because "which org am I" and "can I actually call the API" are the two
+// things a script asks after switching.
+type switchJSON struct {
+	Action       string `json:"action"`
+	OK           bool   `json:"ok"`
+	Org          string `json:"org"`
+	OrgName      string `json:"org_name,omitempty"`
+	APIKeyStored bool   `json:"api_key_stored"`
 }
 
 // isOfflineError reports whether err looks like "could not reach the console"

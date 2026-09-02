@@ -14,7 +14,7 @@ import (
 
 func TestKeysCreateStoresAndPrintsOnce(t *testing.T) {
 	isolate(t)
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	cfg := sessionOnly(t)
 	cfg.ActiveOrg = "org_a"
 	cfg.UpsertOrg("org_a", "Alpha")

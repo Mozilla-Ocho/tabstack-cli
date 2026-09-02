@@ -3,11 +3,13 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +59,16 @@ func setTestApp(t *testing.T) *bytes.Buffer {
 		},
 	}
 	t.Cleanup(func() { rootApp = prev })
+	return buf
+}
+
+// setTestAppPretty is setTestApp in pretty mode. Tests are piped, so the
+// default is JSON; the management and config commands now honour that, which
+// means their human-output assertions have to opt into pretty explicitly.
+func setTestAppPretty(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := setTestApp(t)
+	rootApp.renderer.Mode = ui.ModePretty
 	return buf
 }
 
@@ -506,13 +518,21 @@ func TestPrintStatusPrettyStates(t *testing.T) {
 }
 
 func TestPrintLocalList(t *testing.T) {
+	// --local emits objects keyed by "path", the same key `schema list` uses,
+	// so `jq '.[].path'` works against either. It used to emit bare strings,
+	// which meant the same command had two output shapes depending on a flag.
 	t.Run("json", func(t *testing.T) {
 		buf := setTestApp(t)
-		if err := printLocalList([]string{"a.json", "b.json"}); err != nil {
+		if err := printLocalList([]string{"jobs/a.json", "b.json"}); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(buf.String(), `["a.json","b.json"]`) {
-			t.Errorf("output = %s", buf.String())
+		var got []localEntryJSON
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("output is not a JSON array of objects: %v (%s)", err, buf.String())
+		}
+		want := []localEntryJSON{{Path: "jobs/a.json", Name: "a"}, {Path: "b.json", Name: "b"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %+v, want %+v", got, want)
 		}
 	})
 	t.Run("pretty empty", func(t *testing.T) {

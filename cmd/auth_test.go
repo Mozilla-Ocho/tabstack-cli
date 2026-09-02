@@ -33,7 +33,7 @@ func signedIn(t *testing.T) *config.Config {
 func TestAuthStatusSignedIn(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	signedIn(t)
 
 	// A console that still knows about the stored key: no revocation warning.
@@ -66,7 +66,7 @@ func TestAuthStatusSignedIn(t *testing.T) {
 func TestAuthStatusNotSignedIn(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	cmd := newAuthStatusCmd()
 	cmd.SetContext(context.Background())
@@ -85,7 +85,7 @@ func TestAuthStatusNotSignedIn(t *testing.T) {
 func TestAuthStatusReportsEnvOverride(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "key-from-env")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	signedIn(t)
 	flagAuthURL = "http://127.0.0.1:1" // unreachable: the revocation check is best-effort
 
@@ -103,7 +103,7 @@ func TestAuthStatusReportsEnvOverride(t *testing.T) {
 func TestAuthStatusWarnsOnRevokedKey(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	signedIn(t)
 
 	// The console no longer lists the stored key id.
@@ -130,7 +130,7 @@ func TestAuthStatusWarnsOnRevokedKey(t *testing.T) {
 func TestAuthStatusWarnsOnLoosePermissions(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	// Write a 0644 config at the store path.
 	store := rootApp.store
@@ -153,7 +153,7 @@ func TestAuthStatusWarnsOnLoosePermissions(t *testing.T) {
 
 func TestAuthLogoutClearsSessionButKeepsKeys(t *testing.T) {
 	isolate(t)
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	signedIn(t)
 
 	var gotPath, gotMethod string
@@ -230,7 +230,7 @@ func TestAuthLogoutWithoutASession(t *testing.T) {
 
 func TestAuthSessionsList(t *testing.T) {
 	isolate(t)
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	signedIn(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

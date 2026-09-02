@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 
 func TestConfigPathPrintsTheStorePath(t *testing.T) {
 	isolate(t)
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	cmd := newConfigPathCmd()
 	cmd.SetContext(context.Background())
@@ -27,7 +28,7 @@ func TestConfigPathPrintsTheStorePath(t *testing.T) {
 func TestConfigShowRedactsEverySecret(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	cfg := rootApp.cfg
 	cfg.Session = &config.Session{
@@ -78,7 +79,7 @@ func TestConfigShowRedactsEverySecret(t *testing.T) {
 func TestConfigShowOnAFreshInstall(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	cmd := newConfigShowCmd()
 	cmd.SetContext(context.Background())
@@ -96,7 +97,7 @@ func TestConfigShowOnAFreshInstall(t *testing.T) {
 func TestConfigShowFlagsTheEnvOverrideAndLoosePermissions(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "key-from-env")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 
 	if err := rootApp.store.Save(rootApp.cfg); err != nil {
 		t.Fatal(err)
@@ -122,7 +123,7 @@ func TestConfigShowFlagsTheEnvOverrideAndLoosePermissions(t *testing.T) {
 func TestConfigShowSaysWhenTheLegacyKeyIsInUse(t *testing.T) {
 	isolate(t)
 	t.Setenv(config.EnvAPIKey, "")
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	rootApp.cfg.LegacyAPIKey = "key-legacy-plaintext"
 
 	cmd := newConfigShowCmd()
@@ -188,7 +189,7 @@ func TestDropLegacyKey(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			isolate(t)
-			buf := setTestApp(t)
+			buf := setTestAppPretty(t)
 			cfg := rootApp.cfg
 			cfg.LegacyAPIKey = tc.legacy
 			cfg.ActiveOrg = tc.activeOrg
@@ -256,5 +257,69 @@ func TestConfigCommandsAreRegistered(t *testing.T) {
 		if !sub[want] {
 			t.Errorf("config %s not registered", want)
 		}
+	}
+}
+
+// TestConfigShowJSONRedactsEverything is the security-relevant half of the new
+// JSON mode: adding a machine-readable output must not become a way to read a
+// credential out of the config in full.
+func TestConfigShowJSONRedactsEverything(t *testing.T) {
+	isolate(t)
+	setTestApp(t)
+	cfg := rootApp.cfg
+	cfg.ActiveOrg = "org_a"
+	org := cfg.UpsertOrg("org_a", "Alpha")
+	org.APIKey = "ts-secret-plaintext-key-value"
+	org.APIKeyID = "k1"
+	cfg.LegacyAPIKey = "ts-legacy-plaintext-value"
+	cfg.Session = &config.Session{
+		AccessToken:  "at-secret-plaintext-token",
+		RefreshToken: "rt-secret-plaintext-token",
+		UserEmail:    "user@example.test",
+	}
+
+	out := configJSON(cfg, rootApp.store.Path())
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, secret := range []string{
+		"ts-secret-plaintext-key-value",
+		"ts-legacy-plaintext-value",
+		"at-secret-plaintext-token",
+		"rt-secret-plaintext-token",
+	} {
+		if strings.Contains(body, secret) {
+			t.Errorf("config show --output json leaked a secret: %s", secret)
+		}
+	}
+	// The refresh token has no field at all, redacted or otherwise.
+	if strings.Contains(body, "refresh") {
+		t.Errorf("refresh token should not appear in the JSON shape: %s", body)
+	}
+	if len(out.Orgs) != 1 || !out.Orgs[0].Active || !out.Orgs[0].KeyStored {
+		t.Errorf("org row wrong: %+v", out.Orgs)
+	}
+}
+
+// TestAuthStatusJSONRedactsTheKey guards the same property for auth status.
+func TestAuthStatusJSONRedactsTheKey(t *testing.T) {
+	isolate(t)
+	setTestApp(t)
+	cfg := rootApp.cfg
+	cfg.ActiveOrg = "org_a"
+	org := cfg.UpsertOrg("org_a", "Alpha")
+	org.APIKey = "ts-secret-plaintext-key-value"
+
+	raw, err := json.Marshal(authStatusJSON(cfg, "/tmp/x/config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "ts-secret-plaintext-key-value") {
+		t.Errorf("auth status --output json leaked the key: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"api_key_stored":true`) {
+		t.Errorf("api_key_stored not reported: %s", raw)
 	}
 }
