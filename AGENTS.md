@@ -273,7 +273,7 @@ most expensive.
 |------|---------|--------------|
 | `0` | success | proceed |
 | `1` | runtime / network error | already retried twice; check connectivity, or raise `--retries`. |
-| `2` | usage / invalid input or missing config | **fix the command**: bad flag, missing required arg, malformed JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
+| `2` | usage / invalid input or missing config | **fix the command**: unknown command or subcommand, unknown flag, unparseable flag value, wrong argument count, malformed URL or JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
 | `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. |
 
 Exit-3 messages keep the literal `api error (NNN): <message>` core, so existing
@@ -290,6 +290,10 @@ Quote the trace id in a support request. It is now on the failure itself, so
 `--debug` is no longer needed to obtain it.
 
 Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
+
+Exit `2` is exhaustive for usage mistakes: every one carries the code on the
+error itself rather than being recognised from its wording, so it does not
+drift between releases. Branch on the code, never on the message.
 
 ## Gotchas
 

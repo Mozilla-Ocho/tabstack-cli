@@ -138,8 +138,18 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 `cmd/helpers.go` defines `exitErr{code, err}` and `classifyError`:
 - **1**: runtime/network error
-- **2**: usage error (cobra default; also `withCode(2, ...)` for local input validation)
+- **2**: usage error, bad input, or missing configuration
 - **3**: API error (`client.APIError`) or in-band stream failure
+
+The codes are documented public behaviour, so **every usage error carries code 2 on the error itself**. `main.go` used to infer it by string-matching Cobra's message prefixes, which made the contract hostage to Cobra's wording; that function is gone. Three routes produce a coded usage error, and between them they cover every path:
+
+- **positional arity**: `exactArgsNamed`, `minArgsNamed`, `maxArgsNamed`, `noArgsNamed`, all returning `withCode(2, ...)`. `cobra.ArbitraryArgs` on `schema pull` is the one stock validator left, and is safe because it can never fail.
+- **a stray argument to a grouping command**: `applyGroupBehaviour` walks the tree in `NewRootCmd`.
+- **flag parsing**: one `root.SetFlagErrorFunc`, inherited by the whole tree, covering unknown flags, unknown shorthands, and values that fail to parse for their type.
+
+`applyGroupBehaviour` has to set **both** `Args` and `RunE`, for two reasons buried in Cobra: `Find` calls its own `legacyArgs` **only when `Args` is nil**, and `execute()` returns `flag.ErrHelp` for a non-runnable command **before** it reaches `ValidateArgs`. With only one of the two, `tabstack extract nope` printed help and exited 0. It also sets `skipClient`, because `ValidateArgs` runs before `PersistentPreRunE` and the no-argument help path would otherwise demand an API key just to print help. Annotations are not inherited, so leaves keep their own behaviour.
+
+`cmd/tabstack/main_test.go` asserts the whole table against the **built binary**, which is the only place the contract actually holds.
 
 `client.APIError` renders as `request failed: api error (NNN): <message>`, optionally followed by status guidance and `(trace id <id>)`. Three details are deliberate. The literal `api error (NNN):` substring is preserved because that is what anything grepping stderr matches on. It does **not** lead the string: fang title-cases the first word, which turned it into `Api error` and silently broke that same grep, so a plain word goes first. And `TraceID`/`RetryAfter` are captured in `decodeError` from `x-trace-id` and `Retry-After`, putting the support id on the failure rather than only under `--debug`, which you would have had to know to pass beforehand. `guidance()` covers 401, 403, and 429 only; a generic hint on every status would be noise. `console.APIError` carries `TraceID` too, since console failures also exit 3.
 

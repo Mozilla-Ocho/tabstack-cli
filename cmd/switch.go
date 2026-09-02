@@ -21,7 +21,7 @@ func newAuthSwitchCmd() *cobra.Command {
 			"use. Pass an organisation id, name, or unique name prefix, or run with no\n" +
 			"argument to pick from a list.",
 		Example:           "  # Pick from a list\n  tabstack auth switch\n\n  # By id, exact name, or unique name prefix\n  tabstack auth switch org_01hxyz\n  tabstack auth switch acme",
-		Args:              cobra.MaximumNArgs(1),
+		Args:              maxArgsNamed(1, "[organisation]"),
 		ValidArgsFunction: completeOrgs,
 		Annotations:       map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {

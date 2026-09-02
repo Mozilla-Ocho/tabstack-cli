@@ -66,7 +66,7 @@ func newSchemaListCmd() *cobra.Command {
 		Short:       "List schemas in the library (or just the ones pulled locally)",
 		Example:     "  # Everything in the public library, grouped by category\n  tabstack schema list\n\n  # Only what you have pulled, without touching the network\n  tabstack schema list --local\n\n  # Ignore the cached index and refetch it\n  tabstack schema list --refresh",
 		Annotations: map[string]string{"skipClient": "true"},
-		Args:        cobra.NoArgs,
+		Args:        noArgsNamed(),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := schemaStoreDir(storage)
 			if err != nil {
@@ -118,6 +118,8 @@ func newSchemaPullCmd() *cobra.Command {
 			"are prompted to overwrite, keep your local copy, or quit. Use --force to\n" +
 			"overwrite without prompting. Customise a pulled schema, then re-pull only\n" +
 			"when you want the latest upstream version.",
+		// The one cobra validator left in the tree, and safe: ArbitraryArgs
+		// never returns an error, so it cannot produce a miscoded exit.
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completePullSelectors,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -169,7 +171,7 @@ func newSchemaStatusCmd() *cobra.Command {
 		Short:       "Show which pulled schemas are modified or out of date",
 		Example:     "  # What have I changed, and what has moved upstream?\n  tabstack schema status\n\n  # Skip the network; only report local edits\n  tabstack schema status --local",
 		Annotations: map[string]string{"skipClient": "true"},
-		Args:        cobra.NoArgs,
+		Args:        noArgsNamed(),
 		Long: "Report the state of each pulled schema by comparing it against the\n" +
 			"content recorded when it was pulled. Local edits show as 'modified';\n" +
 			"upstream changes show as 'outdated'. Use --local to skip the network and\n" +
@@ -227,7 +229,7 @@ func newSchemaRmCmd() *cobra.Command {
 		Short:             "Remove pulled schemas from the local store",
 		Example:           "  tabstack schema rm job-posting\n  tabstack schema rm jobs/job-posting.json finance/crypto-asset.json",
 		Annotations:       map[string]string{"skipClient": "true"},
-		Args:              cobra.MinimumNArgs(1),
+		Args:              minArgsNamed(1, "<selector>"),
 		ValidArgsFunction: completeLocalSchemaNames,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			dir, err := schemaStoreDir(storage)

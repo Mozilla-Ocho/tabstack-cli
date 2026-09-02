@@ -34,7 +34,7 @@ func newKeysUseCmd() *cobra.Command {
 			"`tabstack keys list`) to pick directly; with no id, the single key is\n" +
 			"adopted automatically or you are prompted to choose.",
 		Example:     "  # Adopt the organisation's only key, or pick from a list\n  tabstack keys use\n\n  # Adopt a specific one (id from `tabstack keys list`)\n  tabstack keys use key_abc123",
-		Args:        cobra.MaximumNArgs(1),
+		Args:        maxArgsNamed(1, "[key-id]"),
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := requireSession()

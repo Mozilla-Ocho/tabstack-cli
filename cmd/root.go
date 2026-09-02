@@ -166,6 +166,22 @@ func NewRootCmd() *cobra.Command {
 	// and the local store, so none of these apply to it.
 	root.AddCommand(agent, extract, generate, newSchemaCmd(), auth, keys, cfgCmd, mcp)
 
+	// Exit codes are documented public behaviour, so every usage error has to
+	// carry code 2 on the error itself rather than being recognised from its
+	// text later. Three routes produce one:
+	//
+	//   - positional arity, handled by the *ArgsNamed validators per command;
+	//   - a stray argument to a grouping command, wired up here;
+	//   - flag parsing, which Cobra funnels through FlagErrorFunc.
+	//
+	// FlagErrorFunc is inherited by the whole tree from the root, so one
+	// registration covers unknown flags, unknown shorthands, and values that
+	// fail to parse for their type.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return withCode(2, err)
+	})
+	applyGroupBehaviour(root)
+
 	return root
 }
 

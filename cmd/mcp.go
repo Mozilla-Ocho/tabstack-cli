@@ -39,7 +39,7 @@ func newMCPCmd() *cobra.Command {
 			"or set TABSTACK_API_KEY for a non-interactive setup.\n\n" +
 			"stdout carries the JSON-RPC protocol; logs go to stderr.",
 		Example:      "  # Run the server (an MCP client normally launches this for you)\n  tabstack mcp\n\n  # Claude Desktop / IDE config entry:\n  #   \"tabstack\": { \"command\": \"tabstack\", \"args\": [\"mcp\"] }",
-		Args:         cobra.NoArgs,
+		Args:         noArgsNamed(),
 		Annotations:  map[string]string{"skipClient": "true"},
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {

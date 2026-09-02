@@ -253,39 +253,116 @@ func validURL(raw string) error {
 	return nil
 }
 
-// exactArgsNamed is cobra.ExactArgs with a message that names what is missing.
-// The stock one says "accepts 1 arg(s), received 0", which tells the user the
-// shape of their mistake but not what to type. names lists the positional
-// arguments in order, e.g. "<url>".
+// Positional-argument validators.
+//
+// These replace cobra.ExactArgs and friends throughout the tree for two
+// reasons. Their messages name the argument rather than saying "accepts 1
+// arg(s), received 0", and, more importantly, they carry exit code 2 on the
+// error itself. main used to infer that code by string-matching Cobra's
+// message prefixes, which is a contract-level risk on any Cobra bump: the exit
+// codes are documented public behaviour.
+//
+// All of them avoid leading with cmd.CommandPath(), because fang title-cases
+// the first word of a rendered error and would print "Tabstack extract ...".
+// A format string starting with %s hides that from the copy lint, so it has to
+// be watched by hand here.
+
+// exactArgsNamed accepts exactly len(names) arguments.
 func exactArgsNamed(names ...string) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) == len(names) {
 			return nil
 		}
-		// These messages deliberately do not lead with cmd.CommandPath(): fang
-		// title-cases the first word, which would print "Tabstack extract ...".
-		// A format string starting with %s hides that from the lint rule, so it
-		// has to be caught by hand here.
 		want := strings.Join(names, " ")
-		switch {
-		case len(args) < len(names):
-			return fmt.Errorf("missing %s; run `%s --help`", want, cmd.CommandPath())
-		default:
-			return fmt.Errorf("too many arguments for `%s`: expected %s, got %d; quote the value if it contains spaces",
-				cmd.CommandPath(), want, len(args))
+		if len(args) < len(names) {
+			return withCode(2, fmt.Errorf("missing %s; run `%s --help`", want, cmd.CommandPath()))
 		}
+		return withCode(2, fmt.Errorf("too many arguments for `%s`: expected %s, got %d; quote the value if it contains spaces",
+			cmd.CommandPath(), want, len(args)))
 	}
 }
 
-// minArgsNamed is cobra.MinimumNArgs with a message that names what is
-// missing, the variadic counterpart to exactArgsNamed. Same rule about not
-// leading with the command path: fang title-cases the first word.
+// noArgsNamed accepts no positional arguments.
+func noArgsNamed() cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		return withCode(2, fmt.Errorf("`%s` takes no arguments, but got %q; run `%s --help`",
+			cmd.CommandPath(), args[0], cmd.CommandPath()))
+	}
+}
+
+// maxArgsNamed accepts at most n arguments, where name describes the optional
+// one, e.g. "[key-id]".
+func maxArgsNamed(n int, name string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) <= n {
+			return nil
+		}
+		return withCode(2, fmt.Errorf("too many arguments for `%s`: expected at most %s, got %d; quote the value if it contains spaces",
+			cmd.CommandPath(), name, len(args)))
+	}
+}
+
+// unknownSubcommandArgs is the validator for commands that only group others.
+// Cobra's default lets a stray argument fall through to the group, which then
+// prints help and exits 0, so `tabstack extract nope` looked like success.
+func unknownSubcommandArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	msg := fmt.Sprintf("unknown command %q for `%s`", args[0], cmd.CommandPath())
+	if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
+		msg += ". Did you mean: " + strings.Join(suggestions, ", ")
+	}
+	return withCode(2, errors.New(msg))
+}
+
+// applyGroupBehaviour walks the tree and makes every grouping command reject a
+// stray argument with exit 2 instead of printing help and exiting 0.
+//
+// It has to set both Args and RunE, for two reasons that only show up in
+// Cobra's internals. Find calls its own legacyArgs **only when Args is nil**,
+// so setting Args is what stops the uncoded default error; and execute()
+// returns flag.ErrHelp for a non-runnable command **before** it reaches
+// ValidateArgs, so without a RunE the validator would never be consulted at
+// all. Together they mean a group is runnable, validates, and still prints
+// help when given nothing.
+//
+// The skipClient annotation comes along because ValidateArgs runs before
+// PersistentPreRunE: on the no-argument help path the pre-run would otherwise
+// fire and demand an API key just to show `tabstack extract --help` output.
+// Annotations are not inherited, so leaves keep their own behaviour.
+func applyGroupBehaviour(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		applyGroupBehaviour(sub)
+	}
+	if cmd.Runnable() || !cmd.HasSubCommands() || cmd.Args != nil {
+		return
+	}
+
+	cmd.Args = unknownSubcommandArgs
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations["skipClient"] = "true"
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return c.Help()
+		}
+		return unknownSubcommandArgs(c, args)
+	}
+}
+
+// minArgsNamed accepts n or more arguments, the variadic counterpart to
+// exactArgsNamed.
 func minArgsNamed(n int, name string) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) >= n {
 			return nil
 		}
-		return fmt.Errorf("missing %s; run `%s --help`", name, cmd.CommandPath())
+		return withCode(2, fmt.Errorf("missing %s; run `%s --help`", name, cmd.CommandPath()))
 	}
 }
 
