@@ -193,10 +193,10 @@ func newAutomateCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
-				return withCode(2, fmt.Errorf("--max-iterations must be between 1 and 100 (got %d)", maxIter))
+				return withCode(2, fmt.Errorf("max iterations must be between 1 and 100 (--max-iterations got %d)", maxIter))
 			}
 			if maxValidation != 0 && (maxValidation < 1 || maxValidation > 10) {
-				return withCode(2, fmt.Errorf("--max-validation-attempts must be between 1 and 10 (got %d)", maxValidation))
+				return withCode(2, fmt.Errorf("max validation attempts must be between 1 and 10 (--max-validation-attempts got %d)", maxValidation))
 			}
 			req := client.AutomateRequest{
 				Task:                  args[0],
@@ -235,7 +235,7 @@ func newAutomateCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&url, "url", "", "starting URL for the task")
-	f.StringVar(&dataSpec, "data", "", "JSON context: literal, @file, or - for stdin")
+	f.StringVar(&dataSpec, "data", "", "context as JSON: literal, @file, or - for stdin")
 	f.StringVar(&guardrails, "guardrails", "", "safety constraints for execution")
 	f.IntVar(&maxIter, "max-iterations", 0, "maximum task iterations (1-100)")
 	f.IntVar(&maxValidation, "max-validation-attempts", 0, "maximum validation attempts (1-10)")
@@ -291,7 +291,7 @@ func newResearchCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&mode, "mode", "", "research mode: fast|balanced")
-	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "per-page fetch timeout in seconds")
+	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "fetch timeout per page, in seconds")
 	f.BoolVar(&nocache, "nocache", false, "skip cache and force fresh research")
 
 	return cmd
@@ -311,7 +311,7 @@ func newInputCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
-				return withCode(2, fmt.Errorf("--data is required (JSON object with fields or cancelled)"))
+				return withCode(2, fmt.Errorf("the --data flag is required: a JSON object with \"fields\", or {\"cancelled\":true}"))
 			}
 			raw, err := readJSON(dataSpec)
 			if err != nil {
@@ -320,11 +320,11 @@ func newInputCmd() *cobra.Command {
 
 			var req client.AutomateInputRequest
 			if err := json.Unmarshal(raw, &req); err != nil {
-				return withCode(2, fmt.Errorf("--data: %w", err))
+				return withCode(2, fmt.Errorf("invalid --data: %w", err))
 			}
 			if len(req.Fields) == 0 && !req.Cancelled {
 				return withCode(2, fmt.Errorf(
-					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
+					"the --data payload must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
 						"got neither, unknown keys are ignored by the API",
 				))
 			}
@@ -343,7 +343,7 @@ func newInputCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dataSpec, "data", "", "JSON input payload: {\"fields\":[{\"ref\":\"...\",\"value\":\"...\"}]} or {\"cancelled\":true} (required)")
+	cmd.Flags().StringVar(&dataSpec, "data", "", "input payload as JSON: {\"fields\":[{\"ref\":\"...\",\"value\":\"...\"}]} or {\"cancelled\":true} (required)")
 	return cmd
 }
 

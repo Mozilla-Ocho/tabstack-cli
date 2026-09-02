@@ -49,7 +49,7 @@ func newGenerateJSONCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if instructions == "-" && schema == "-" {
 				return withCode(2, fmt.Errorf(
-					"--schema and --instructions cannot both read from stdin (-); "+
+					"only one flag can read stdin, but --schema and --instructions both got -; "+
 						"pass one as a literal string or @file",
 				))
 			}
@@ -58,7 +58,7 @@ func newGenerateJSONCmd() *cobra.Command {
 				return withCode(2, err)
 			}
 			if instr == "" {
-				return withCode(2, fmt.Errorf("--instructions is required"))
+				return withCode(2, fmt.Errorf("the --instructions flag is required"))
 			}
 			if err := checkLen("instructions", instr, maxInstructionsLen); err != nil {
 				return err

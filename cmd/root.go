@@ -86,7 +86,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagAPIKey, "api-key", "", "API key (overrides env and stored keys)")
+	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API (overrides env and stored keys)")
 	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
 	pf.StringVar(&flagBaseURL, "base-url", "", "product API base URL")
 	pf.StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")

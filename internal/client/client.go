@@ -64,9 +64,9 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	if e.Message != "" {
-		return fmt.Sprintf("api error (%d): %s", e.StatusCode, e.Message)
+		return fmt.Sprintf("product API error (%d): %s", e.StatusCode, e.Message)
 	}
-	return fmt.Sprintf("api error: status %d", e.StatusCode)
+	return fmt.Sprintf("product API error: status %d", e.StatusCode)
 }
 
 // newRequest builds a POST request to path with body marshalled as JSON.

@@ -26,7 +26,7 @@ const (
 // keySetupModeFrom validates the --api-key-setup / --no-key flag pair.
 func keySetupModeFrom(flag string, noKey bool) (keySetupMode, error) {
 	if noKey && flag != "" && flag != string(keySetupSkip) {
-		return keySetupPrompt, fmt.Errorf("--no-key conflicts with --api-key-setup=%s", flag)
+		return keySetupPrompt, fmt.Errorf("cannot combine --no-key with --api-key-setup=%s", flag)
 	}
 	if noKey {
 		return keySetupSkip, nil
@@ -37,7 +37,7 @@ func keySetupModeFrom(flag string, noKey bool) (keySetupMode, error) {
 		return keySetupMode(flag), nil
 	case keySetupExisting:
 		if !console.RevealEnabled {
-			return keySetupPrompt, errors.New("--api-key-setup=existing is not available in this build; use create or skip")
+			return keySetupPrompt, errors.New("the existing-key option is not available in this build; use --api-key-setup=create or skip")
 		}
 		return keySetupExisting, nil
 	default:

@@ -107,7 +107,7 @@ func newExtractJSONCmd() *cobra.Command {
 	}
 
 	f := cmd.Flags()
-	f.StringVar(&schema, "schema", "", "JSON schema: literal, @file, or - for stdin")
+	f.StringVar(&schema, "schema", "", "schema as JSON: literal, @file, or - for stdin")
 	f.StringVar(&schemaName, "schema-name", "", "name of a pulled schema to use (see `tabstack schema pull`)")
 	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")

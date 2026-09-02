@@ -205,13 +205,17 @@ func TestAPIErrorPlainBody(t *testing.T) {
 	}
 }
 
+// TestAPIErrorMessageFormat also guards the leading word: fang title-cases the
+// first word of a rendered error, so a message starting "api error" surfaced to
+// the user as "Api error". Leading with "product" keeps the acronym intact and
+// distinguishes these from console.APIError's "console error".
 func TestAPIErrorMessageFormat(t *testing.T) {
 	withMsg := &APIError{StatusCode: 400, Message: "nope"}
-	if withMsg.Error() != "api error (400): nope" {
+	if withMsg.Error() != "product API error (400): nope" {
 		t.Errorf("Error() = %q", withMsg.Error())
 	}
 	noMsg := &APIError{StatusCode: 503}
-	if noMsg.Error() != "api error: status 503" {
+	if noMsg.Error() != "product API error: status 503" {
 		t.Errorf("Error() = %q", noMsg.Error())
 	}
 }

@@ -27,7 +27,7 @@ import (
 func resolveSchemaArg(schema, schemaName, storage string) (json.RawMessage, error) {
 	switch {
 	case schema != "" && schemaName != "":
-		return nil, withCode(2, errors.New("--schema and --schema-name are mutually exclusive"))
+		return nil, withCode(2, errors.New("pass --schema or --schema-name, not both"))
 	case schema == "" && schemaName == "":
 		return nil, withCode(2, errors.New("required: --schema (literal, @file, or -) or --schema-name (a pulled schema)"))
 	}
