@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"github.com/spf13/cobra"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -318,7 +319,7 @@ func TestSetupAppWithOrgOverride(t *testing.T) {
 		flagOrg = "bravo"
 		t.Cleanup(func() { flagOrg = "" })
 
-		if err := setupApp(); err != nil {
+		if err := setupApp(&cobra.Command{}); err != nil {
 			t.Fatalf("setupApp: %v", err)
 		}
 		if rootApp.key.APIKey != "key-bravo" {
@@ -341,7 +342,7 @@ func TestSetupAppWithOrgOverride(t *testing.T) {
 		flagOrg = "org_c"
 		t.Cleanup(func() { flagOrg = "" })
 
-		err := setupApp()
+		err := setupApp(&cobra.Command{})
 		if codeOf(err) != 2 {
 			t.Fatalf("err = %v, want exit code 2", err)
 		}
@@ -359,7 +360,7 @@ func TestSetupAppWithOrgOverride(t *testing.T) {
 		flagOrg = "org_missing"
 		t.Cleanup(func() { flagOrg = "" })
 
-		if err := setupApp(); codeOf(err) != 2 {
+		if err := setupApp(&cobra.Command{}); codeOf(err) != 2 {
 			t.Errorf("err = %v, want exit code 2", err)
 		}
 	})
@@ -375,7 +376,7 @@ func TestSetupAppUsesLegacyKeyWithoutAnActiveOrg(t *testing.T) {
 
 	storeAt(t, &config.Config{LegacyAPIKey: "key-legacy"})
 
-	if err := setupApp(); err != nil {
+	if err := setupApp(&cobra.Command{}); err != nil {
 		t.Fatalf("setupApp: %v", err)
 	}
 	if rootApp.key.APIKey != "key-legacy" || rootApp.key.Source != config.SourceLegacy {

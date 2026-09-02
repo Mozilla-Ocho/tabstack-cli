@@ -219,9 +219,52 @@ would go out if I switched".
 | Product API | `base_url` | `TABSTACK_BASE_URL` | `--base-url` |
 | Auth and management | `auth_url` | `TABSTACK_AUTH_URL` | `--auth-url` |
 
+Settings resolve flags first, then environment variables, then a project
+`.tabstack.toml`, then your own config file, then the built-in default.
+
 Two more environment variables have no config or flag equivalent:
 `TABSTACK_OAUTH_SCOPES` overrides the scopes requested at login (provisional,
 and unlikely to be needed), and `NO_COLOR` disables colour.
+
+### Project settings
+
+A repository can pin the settings everyone working in it should share, in a
+`.tabstack.toml` at its root:
+
+```toml
+# .tabstack.toml
+active_org  = "acme"       # which of *your* organisations this repo works against
+storage     = "./schemas"  # relative to this file, not your shell
+concurrency = 8
+retries     = 5
+effort      = "max"
+```
+
+It is found by searching upwards from the working directory, so it applies from
+anywhere in the repository, and the search stops at the repository root or your
+home directory. Precedence is flags, then environment, then this file, then your
+own config, so an explicit flag always wins.
+
+**A project file cannot carry a credential or an endpoint.** It arrives by
+`git clone`, so anything it could set is something a repository author could set
+on your machine. `api_key`, `session`, and `orgs` are rejected because a project
+file is the file you commit; `base_url` and `auth_url` are rejected because they
+decide *where your key is sent*, and honouring them from a cloned repository
+would turn `git clone` into credential exfiltration. Those stay on `--base-url`
+and `TABSTACK_BASE_URL`, for development.
+
+Setting one is an error naming the key, not a silent omission: someone who wrote
+`api_key` there believes it is working and may be about to commit it. An unknown
+key is an error too, so a typo does not fail quietly.
+
+| | |
+|---|---|
+| Allowed | `active_org`, `storage`, `output`, `effort`, `geo`, `timeout`, `max_duration`, `concurrency`, `retries` |
+| Rejected | `api_key`, `legacy_api_key`, `session`, `orgs`, `base_url`, `auth_url` |
+
+`tabstack config show` reports the file it found and what it contributed. For a
+reproducible CI run, `TABSTACK_NO_PROJECT_CONFIG=1` ignores project config
+entirely, and `TABSTACK_PROJECT_CONFIG=/path` uses one specific file.
 
 ### Upgrading from a pre-organisation config
 

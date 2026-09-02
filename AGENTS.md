@@ -42,6 +42,23 @@ organisation's key.
 **Prefer `TABSTACK_API_KEY` over `--api-key`**: a key on the command line is
 visible in shell history and to `ps` while the command runs.
 
+## Project configuration
+
+A repository may ship a `.tabstack.toml`, found by searching upwards from the
+working directory and stopping at the repository root or `$HOME`. It sits
+between environment variables and the user's config: **flags > env > project >
+user config > default**.
+
+It may set only `active_org`, `storage`, `output`, `effort`, `geo`, `timeout`,
+`max_duration`, `concurrency`, and `retries`. Credentials (`api_key`,
+`session`, `orgs`) and endpoints (`base_url`, `auth_url`) are **rejected with
+exit `2`**, so a cloned repository can neither carry a key nor redirect where
+yours is sent. An unknown key is exit `2` as well.
+
+For a reproducible run set **`TABSTACK_NO_PROJECT_CONFIG=1`**, which ignores
+any project file. `TABSTACK_PROJECT_CONFIG=/path` selects one explicitly.
+`tabstack config show` reports which file was used and what it contributed.
+
 ## Global flags
 
 Only `--output` and `--no-color` are accepted everywhere. The rest are

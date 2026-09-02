@@ -33,9 +33,12 @@ type app struct {
 	client   *client.Client
 	renderer ui.Renderer
 
-	// orgOverride is the organisation id resolved from --org, empty when the
-	// flag was not used. It is per-invocation only and never written to config.
+	// orgOverride is the organisation id resolved from --org, or from a
+	// project file's active_org. Per-invocation only, never written to config.
 	orgOverride string
+
+	// project is the discovered .tabstack.toml, nil when there is none.
+	project *config.ProjectConfig
 }
 
 // defaultTimeout bounds non-streaming calls so a wedged request eventually
@@ -117,9 +120,9 @@ func NewRootCmd() *cobra.Command {
 		// any credential exists.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Annotations["skipClient"] == "true" {
-				return setupRendererOnly()
+				return setupRendererOnly(cmd)
 			}
-			return setupApp()
+			return setupApp(cmd)
 		},
 	}
 
@@ -260,16 +263,23 @@ func newRenderer() (ui.Renderer, error) {
 
 // setupApp loads config, resolves the product credential, and builds the client.
 // It is the pre-run for every command that talks to the product API.
-func setupApp() error {
-	base, err := setupBase()
+func setupApp(cmd *cobra.Command) error {
+	base, err := setupBase(cmd)
 	if err != nil {
 		return err
 	}
 
-	if flagOrg != "" {
-		id, err := resolveOrgLocal(base.cfg, flagOrg)
+	// --org wins; a project file's active_org is the next rung down, above the
+	// user's own active organisation. It is a selector, not a credential, so a
+	// repository can say which of *your* organisations it works against.
+	orgSelector, orgSource := flagOrg, "--org"
+	if orgSelector == "" && base.project != nil && base.project.ActiveOrg != "" {
+		orgSelector, orgSource = base.project.ActiveOrg, base.project.Path
+	}
+	if orgSelector != "" {
+		id, err := resolveOrgLocal(base.cfg, orgSelector)
 		if err != nil {
-			return withCode(2, err)
+			return withCode(2, fmt.Errorf("organisation %q, selected by %s: %w", orgSelector, orgSource, err))
 		}
 		base.orgOverride = id
 	}
@@ -303,8 +313,8 @@ func setupApp() error {
 	// stderr so it shows up in logs and terminals without contaminating piped
 	// stdout.
 	if base.orgOverride != "" {
-		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s)\n",
-			base.cfg.OrgName(base.orgOverride), base.orgOverride)
+		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s), from %s\n",
+			base.cfg.OrgName(base.orgOverride), base.orgOverride, orgSource)
 	}
 
 	rootApp = base
@@ -314,8 +324,8 @@ func setupApp() error {
 // setupRendererOnly builds the renderer and loads config for commands that do
 // not need a product client (auth, keys, schema). No credential is required, so
 // these still work on a fresh install.
-func setupRendererOnly() error {
-	base, err := setupBase()
+func setupRendererOnly(cmd *cobra.Command) error {
+	base, err := setupBase(cmd)
 	if err != nil {
 		return err
 	}
@@ -325,7 +335,17 @@ func setupRendererOnly() error {
 
 // setupBase does the work common to both setups: renderer, credential store,
 // and config load.
-func setupBase() (*app, error) {
+func setupBase(cmd *cobra.Command) (*app, error) {
+	// Project config first: it can set --output, so it has to land before the
+	// renderer reads that flag.
+	project, err := loadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	if err := applyProjectConfig(cmd, project); err != nil {
+		return nil, err
+	}
+
 	renderer, err := newRenderer()
 	if err != nil {
 		return nil, withCode(2, err)
@@ -340,7 +360,7 @@ func setupBase() (*app, error) {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
 
-	return &app{store: store, cfg: cfg, renderer: renderer}, nil
+	return &app{store: store, cfg: cfg, renderer: renderer, project: project}, nil
 }
 
 // newStore builds the credential store. It is a package var so tests can point

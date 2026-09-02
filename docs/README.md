@@ -62,6 +62,17 @@ failed in-band.
 A flag only appears on the commands that read it, so passing `--api-key` to
 `keys list` is an error rather than a silent no-op.
 
+## Project configuration
+
+A repository may ship a `.tabstack.toml` pinning shared settings. It is found by
+searching upwards from the working directory and sits between environment
+variables and your own config: **flags > env > project > user config > default**.
+
+It may set `active_org`, `storage`, `output`, `effort`, `geo`, `timeout`,
+`max_duration`, `concurrency`, and `retries`, and nothing else. Credentials and
+endpoints are rejected with exit `2`, because a project file arrives by
+`git clone` and must not be able to carry a key or redirect where yours is sent.
+
 ## Environment
 
 | Variable | Effect |
@@ -72,3 +83,5 @@ A flag only appears on the commands that read it, so passing `--api-key` to
 | `TABSTACK_OAUTH_SCOPES` | override the scopes requested at login |
 | `NO_COLOR` | disable coloured output |
 | `XDG_CONFIG_HOME` | where `config.toml` and pulled schemas live |
+| `TABSTACK_NO_PROJECT_CONFIG` | ignore any project `.tabstack.toml` |
+| `TABSTACK_PROJECT_CONFIG` | use this project file, skipping discovery |

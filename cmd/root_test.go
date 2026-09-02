@@ -177,7 +177,7 @@ func TestSetupApp(t *testing.T) {
 	flagAPIKey = ""
 	flagBaseURL = ""
 
-	if err := setupApp(); err != nil {
+	if err := setupApp(&cobra.Command{}); err != nil {
 		t.Fatalf("setupApp: %v", err)
 	}
 	if rootApp.key.APIKey != "secret-key-123" {
@@ -198,7 +198,7 @@ func TestSetupAppMissingKey(t *testing.T) {
 	flagOutput = "json"
 	flagAPIKey = ""
 
-	if err := setupApp(); codeOf(err) != 2 {
+	if err := setupApp(&cobra.Command{}); codeOf(err) != 2 {
 		t.Errorf("err = %v, want code 2", err)
 	}
 }
@@ -210,7 +210,7 @@ func TestSetupRendererOnly(t *testing.T) {
 	flagOutput = "json"
 	flagAPIKey = ""
 
-	if err := setupRendererOnly(); err != nil {
+	if err := setupRendererOnly(&cobra.Command{}); err != nil {
 		t.Fatalf("setupRendererOnly: %v", err)
 	}
 	if rootApp.renderer.Out == nil {

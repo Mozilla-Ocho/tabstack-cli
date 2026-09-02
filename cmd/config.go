@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -86,6 +88,18 @@ func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	}
 	fmt.Fprintf(r.Out, "%s %d\n", k.Render("version:"), cfg.Version)
 
+	// Where a setting came from is the question this command exists to answer,
+	// so a project file has to be visible or "why is concurrency 8?" has no
+	// answer anywhere.
+	if pc := rootApp.project; pc != nil {
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("project:"), pc.Path)
+		for _, line := range projectSettingLines(pc) {
+			fmt.Fprintf(r.Out, "    %s\n", r.Styles.Muted.Render(line))
+		}
+	} else {
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("project:"), r.Styles.Muted.Render("none found"))
+	}
+
 	// Session.
 	if cfg.Session == nil || cfg.Session.AccessToken == "" {
 		fmt.Fprintf(r.Out, "%s %s\n", k.Render("session:"), r.Styles.Muted.Render("none, run `tabstack auth login`"))
@@ -158,6 +172,39 @@ func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	}
 }
 
+// projectSettingLines renders what a project file actually contributes.
+func projectSettingLines(pc *config.ProjectConfig) []string {
+	var out []string
+	add := func(name, value string) {
+		if value != "" {
+			out = append(out, name+" = "+value)
+		}
+	}
+	add("active_org", pc.ActiveOrg)
+	add("storage", pc.Storage)
+	add("output", pc.Output)
+	add("effort", pc.Effort)
+	add("geo", pc.Geo)
+	add("timeout", pc.Timeout)
+	add("max_duration", pc.MaxDuration)
+	if pc.Concurrency != nil {
+		add("concurrency", strconv.Itoa(*pc.Concurrency))
+	}
+	if pc.Retries != nil {
+		add("retries", strconv.Itoa(*pc.Retries))
+	}
+	if len(out) == 0 {
+		out = append(out, "(no settings)")
+	}
+	return out
+}
+
+// projectJSON is the machine-readable form of the project layer.
+type projectJSON struct {
+	Path     string            `json:"path"`
+	Settings map[string]string `json:"settings"`
+}
+
 // pathJSON is the object form of `config path`. Pretty mode stays a bare line
 // so it can be substituted into other commands; JSON mode gets a real object
 // so it composes with jq like everything else.
@@ -179,6 +226,7 @@ type configShowJSON struct {
 	AuthURL     string          `json:"auth_url"`
 	ActiveOrg   string          `json:"active_org,omitempty"`
 	Orgs        []configOrgJSON `json:"orgs"`
+	Project     *projectJSON    `json:"project,omitempty"`
 	LegacyKey   string          `json:"legacy_key_preview,omitempty"`
 	LegacyInUse bool            `json:"legacy_key_in_use"`
 	EnvOverride bool            `json:"env_override"`
@@ -242,6 +290,15 @@ func configJSON(cfg *config.Config, path string) configShowJSON {
 			row.KeyID = org.APIKeyID
 		}
 		out.Orgs = append(out.Orgs, row)
+	}
+	if pc := rootApp.project; pc != nil {
+		settings := map[string]string{}
+		for _, line := range projectSettingLines(pc) {
+			if name, value, ok := strings.Cut(line, " = "); ok {
+				settings[name] = value
+			}
+		}
+		out.Project = &projectJSON{Path: pc.Path, Settings: settings}
 	}
 	if cfg.LegacyAPIKey != "" {
 		out.LegacyKey = config.Redact(cfg.LegacyAPIKey)
