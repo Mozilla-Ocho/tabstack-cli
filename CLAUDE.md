@@ -35,6 +35,8 @@ Three layers, each in its own package:
 
 ### Shared app context
 
+Only `--output` and `--no-color` are root persistent flags, because only they apply to every command. The credential and endpoint flags are registered per subtree by `addProductFlags`/`addBaseURLFlag`/`addAuthHostFlag`/`addOrgFlag`/`addDebugFlag` (`cmd/root.go`), so help for `schema list` or `config show` no longer advertises `--api-key` and `--timeout`, which those commands never read. The split follows actual use: product-host commands (`agent`, `extract`, `generate`) take the credential, base URL, timeout, org, and debug flags; `mcp` takes those minus `--org` (`resolveMCPKey` does not honour an override) plus `--auth-url`; `auth` and `keys` take `--auth-url`, with `--org` on `keys` and on `auth login` only; `config` takes both URL flags because `config show` displays them; `schema` takes none. Passing a flag to a command that does not read it is now an "unknown flag" error rather than a silent no-op. `TestFlagPlacement` pins the whole matrix.
+
 `cmd/root.go` defines `app{store, cfg, key, client, renderer, orgOverride}` and stores it in the package-global `rootApp`. The root command's `PersistentPreRunE` populates it **once** before any subcommand runs, so leaf commands never re-resolve config or rebuild the client. Commands tagged with the `skipClient` annotation (all of `auth`, `keys`, and `schema`) get a config-and-renderer setup with no product client, so they work before an API key exists. `consoleClient()`/`requireSession()` build the auth-host client with the session attached.
 
 ### Credentials, orgs, and resolution priority

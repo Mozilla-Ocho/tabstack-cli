@@ -59,6 +59,11 @@ func runMCP(ctx context.Context) error {
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
 	}
+	// Diagnostics go to stderr, which is safe here: the stdio invariant only
+	// reserves stdout for JSON-RPC frames.
+	if flagDebug {
+		opts = append(opts, client.WithDebug(debugSink(rootApp.renderer, nil)))
+	}
 	product := client.New(apiKey, rootApp.cfg.ResolveBaseURL(flagBaseURL), opts...)
 
 	// Console client for the management tools. It may be session-less, in which

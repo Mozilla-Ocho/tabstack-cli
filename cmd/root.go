@@ -85,34 +85,87 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 
+	// Only the two flags every command genuinely uses live on the root. The
+	// rest are registered per subtree by the addXFlags helpers below, so help
+	// for `schema list` or `config show` stops advertising --api-key and
+	// --timeout, which those commands never read. See addProductFlags.
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API (overrides env and stored keys)")
-	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
-	pf.StringVar(&flagBaseURL, "base-url", "", "product API base URL")
-	pf.StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")
-	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
+	_ = root.RegisterFlagCompletionFunc("output", fixedCompletions("pretty", "json"))
+
+	agent, extract, generate := newAgentCmd(), newExtractCmd(), newGenerateCmd()
+	auth, keys, cfgCmd, mcp := newAuthCmd(), newKeysCmd(), newConfigCmd(), newMCPCmd()
+
+	// Product-host commands: they build a client, so they need a credential, a
+	// base URL, a timeout, and can be traced. --org selects which stored key
+	// goes out, which only means anything when a key is being sent.
+	for _, c := range []*cobra.Command{agent, extract, generate} {
+		addProductFlags(c)
+		addOrgFlag(c)
+		addDebugFlag(c)
+	}
+
+	// Auth-host commands talk to the console, so they take --auth-url. keys
+	// also takes --org (`keys create --org acme`); under auth only login reads
+	// it, so it is registered there rather than on the whole group.
+	addAuthHostFlag(auth)
+	addAuthHostFlag(keys)
+	addOrgFlag(keys)
+
+	// config show prints both hosts as they would resolve, so it accepts both
+	// overrides to preview them. It sends nothing anywhere.
+	addBaseURLFlag(cfgCmd)
+	addAuthHostFlag(cfgCmd)
+
+	// mcp straddles both hosts: product tools use the API key, management
+	// tools use the session. It resolves the key without an --org override
+	// (see resolveMCPKey), so it does not take that flag.
+	addProductFlags(mcp)
+	addAuthHostFlag(mcp)
+	addDebugFlag(mcp)
+
+	// schema is deliberately absent: it talks only to raw.githubusercontent.com
+	// and the local store, so none of these apply to it.
+	root.AddCommand(agent, extract, generate, newSchemaCmd(), auth, keys, cfgCmd, mcp)
+
+	return root
+}
+
+// addProductFlags registers the flags that only mean something when a command
+// builds a product-API client.
+func addProductFlags(cmd *cobra.Command) {
+	pf := cmd.PersistentFlags()
+	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API (overrides env and stored keys)")
+	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
 	pf.DurationVar(&flagTimeout, "timeout", defaultTimeout, "request timeout for non-streaming calls; 0 disables (e.g. 30s)")
-	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
-	_ = root.RegisterFlagCompletionFunc("org", completeOrgs)
-	_ = root.RegisterFlagCompletionFunc("output", fixedCompletions("pretty", "json"))
+	addBaseURLFlag(cmd)
+}
 
-	root.AddCommand(
-		newAgentCmd(),
-		newExtractCmd(),
-		newGenerateCmd(),
-		newSchemaCmd(),
-		newAuthCmd(),
-		newKeysCmd(),
-		newConfigCmd(),
-		newMCPCmd(),
-	)
+// addBaseURLFlag registers --base-url on its own, for config show, which
+// displays the resolved product host without ever calling it.
+func addBaseURLFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagBaseURL, "base-url", "", "product API base URL")
+}
 
-	return root
+// addAuthHostFlag registers --auth-url for commands that reach the console.
+func addAuthHostFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")
+}
+
+// addOrgFlag registers the one-shot organisation override.
+func addOrgFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
+	_ = cmd.RegisterFlagCompletionFunc("org", completeOrgs)
+}
+
+// addDebugFlag registers --debug. Only product-host calls are instrumented, so
+// it goes on the commands that make them.
+func addDebugFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 }
 
 // resolveMode decides the output mode. An explicit --output wins; otherwise we

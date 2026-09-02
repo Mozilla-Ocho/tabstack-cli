@@ -3,6 +3,8 @@ package cmd
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
@@ -28,10 +30,11 @@ func isolate(t *testing.T) {
 // not itself 0.
 func TestTimeoutFlagDefault(t *testing.T) {
 	isolate(t)
-	root := NewRootCmd()
-	f := root.PersistentFlags().Lookup("timeout")
+	extract := findCommand(t, NewRootCmd(), "extract")
+	pf := extract.PersistentFlags()
+	f := pf.Lookup("timeout")
 	if f == nil {
-		t.Fatal("no --timeout flag registered")
+		t.Fatal("no --timeout flag registered on extract")
 	}
 	if f.DefValue != defaultTimeout.String() {
 		t.Errorf("--timeout default = %s, want %s", f.DefValue, defaultTimeout)
@@ -40,11 +43,73 @@ func TestTimeoutFlagDefault(t *testing.T) {
 		t.Fatal("defaultTimeout must be positive, or nothing is ever bounded")
 	}
 
-	if err := root.PersistentFlags().Parse([]string{"--timeout", "0"}); err != nil {
+	if err := pf.Parse([]string{"--timeout", "0"}); err != nil {
 		t.Fatal(err)
 	}
 	if flagTimeout != 0 {
 		t.Errorf("--timeout 0 gave %v, want 0 (the disable path)", flagTimeout)
+	}
+}
+
+// findCommand looks up a direct subcommand of root by name.
+func findCommand(t *testing.T, root *cobra.Command, name string) *cobra.Command {
+	t.Helper()
+	for _, c := range root.Commands() {
+		if c.Name() == name {
+			return c
+		}
+	}
+	t.Fatalf("no %q command", name)
+	return nil
+}
+
+// TestFlagPlacement pins which subtrees carry the credential and endpoint
+// flags. They used to sit on the root, so `schema list --help` and
+// `config show --help` advertised --api-key and --timeout, which those
+// commands never read.
+func TestFlagPlacement(t *testing.T) {
+	isolate(t)
+	root := NewRootCmd()
+
+	cases := []struct {
+		cmd  string
+		has  []string
+		hasA []string // must NOT be present
+	}{
+		{"extract", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
+		{"generate", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
+		{"agent", []string{"api-key", "base-url", "timeout", "org", "debug"}, nil},
+		{"mcp", []string{"api-key", "base-url", "timeout", "auth-url", "debug"}, []string{"org"}},
+		{"keys", []string{"auth-url", "org"}, []string{"api-key", "base-url", "timeout"}},
+		{"auth", []string{"auth-url"}, []string{"api-key", "base-url", "timeout"}},
+		{"config", []string{"base-url", "auth-url"}, []string{"api-key", "timeout"}},
+		{"schema", nil, []string{"api-key", "base-url", "auth-url", "timeout", "org", "debug"}},
+	}
+
+	for _, tc := range cases {
+		cmd := findCommand(t, root, tc.cmd)
+		for _, name := range tc.has {
+			if cmd.PersistentFlags().Lookup(name) == nil {
+				t.Errorf("%s: missing --%s", tc.cmd, name)
+			}
+		}
+		for _, name := range tc.hasA {
+			if cmd.PersistentFlags().Lookup(name) != nil {
+				t.Errorf("%s: advertises --%s but never reads it", tc.cmd, name)
+			}
+		}
+	}
+
+	// Only the flags every command uses stay on the root.
+	for _, name := range []string{"api-key", "base-url", "auth-url", "timeout", "org", "debug"} {
+		if root.PersistentFlags().Lookup(name) != nil {
+			t.Errorf("--%s is still a root persistent flag", name)
+		}
+	}
+	for _, name := range []string{"output", "no-color"} {
+		if root.PersistentFlags().Lookup(name) == nil {
+			t.Errorf("--%s should stay on the root", name)
+		}
 	}
 }
 
