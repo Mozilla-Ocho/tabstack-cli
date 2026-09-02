@@ -127,6 +127,12 @@ Redaction is not mode-dependent: `config show` and `auth status` emit previews v
 
 `readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
 
+## Documentation
+
+`docs/` is the command reference: `docs/README.md` is the index and shared conventions (credentials, key resolution, output rules, exit codes, environment), then one page per command group. Each page documents every subcommand's arguments, flags, examples, and **the exact `--output json` shape**. When adding or changing a command, update its page in the same commit: the JSON shapes written there are the closest thing to a published contract for them.
+
+The three docs have different jobs and should not be merged: `README.md` sells and orients, `docs/` is the reference, `AGENTS.md` is the machine-facing cheat sheet for LLM callers.
+
 ## Conventions
 
 - New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`no-cache` flag names (register the last with `addNoCacheFlag`, which also wires the hidden `--nocache` alias).

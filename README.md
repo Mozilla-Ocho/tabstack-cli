@@ -31,6 +31,7 @@ This domain is for use in illustrative examples in documents...
 - [Quick start](#quick-start)
 - [Authentication](#authentication)
 - [Commands](#commands)
+- [Command reference](docs/README.md)
 - [Common options](#common-options)
 - [Output & scripting](#output--scripting)
 - [Exit codes](#exit-codes)
@@ -228,6 +229,11 @@ tabstack config drop-legacy-key    # then remove the old one
 it cannot leave you with nothing that works. `--force` overrides that.
 
 ## Commands
+
+> **Full reference:** [`docs/`](docs/README.md) has a page per command group,
+> documenting every flag, worked examples, and the exact `--output json` shape.
+> This section is the tour; those pages are the detail.
+
 
 | Command | What it does |
 |---------|--------------|
