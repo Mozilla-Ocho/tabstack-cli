@@ -51,6 +51,23 @@ scan() {
 	fi
 }
 
+# scan_cs — as scan, but case sensitive. Needed by the leading-word rules below,
+# where the whole point is the exact casing: "API" must not also match "api", and
+# a lowercase "sign-in" must not also match a capitalised "Sign-in" in prose.
+scan_cs() {
+	local pattern=$1
+	local desc=$2
+	shift 2
+	[ "$#" -gt 0 ] || return 0
+	local m
+	m=$(grep -nHE "$pattern" "$@" 2>/dev/null | strip_allowed || true)
+	if [ -n "$m" ]; then
+		echo "$desc"
+		echo "$m"
+		fail=1
+	fi
+}
+
 # tracked FILES <- git ls-files GLOB... — collect NUL-delimited tracked paths into
 # the FILES array, so paths with spaces or glob chars survive intact (no word
 # splitting on an unquoted command substitution).
@@ -74,6 +91,48 @@ scan '—' 'Em dash (U+2014) found; use a comma, colon, or a sentence split:' \
 tracked md_files '*.md'
 scan 'scrap(e|er|ing)' 'Banned term (scrape/scraper/scraping) in docs; prefer "extract"/"automate":' \
 	${md_files[@]+"${md_files[@]}"}
+
+# Leading word in flag usage and error strings.
+#
+# fang renders help and errors through titleFirstWord, which runs cases.Title
+# over the FIRST word only. That silently mangles anything that must keep its
+# own casing: "API key" prints as "Api key", "JSON schema" as "Json schema",
+# "per-page" as "Per-Page", and worst of all "--schema and ..." prints as
+# "--Schema and ...", which is a flag name the user cannot paste back.
+#
+# There is no fang option to turn this off, so the rule is: no user-facing
+# string may START with a flag name, an acronym, or a hyphenated lowercase word.
+# Reword instead ("key for the product API", "schema as JSON", "pass --schema or
+# --schema-name, not both"). Mid-string is unaffected and needs no change.
+#
+# Test files are excluded: their assertion messages are not user facing.
+#
+# Known blind spot: a format string starting with a verb ("%s needs ...") hides
+# whatever gets substituted in, so a message leading with a command path or flag
+# still slips through. Prefer wording that puts a literal word first.
+ACRONYM='API|JSON|URL|ID|HTTP|HTTPS|CLI|MCP|TOML|SSE|OAuth|PKCE|NDJSON|TTY|XDG'
+# Each alternative requires a trailing space, so only a leading *word* counts.
+# That distinguishes a usage string or sentence ("--schema and --schema-name
+# are ...") from a bare label passed as an argument ("--data"), which is a
+# single token, never rendered first, and so never title-cased.
+LEAD="(--[a-z][a-z0-9-]* |($ACRONYM) |[a-z]+-[a-z]+ )"
+
+tracked all_go '*.go'
+src_go=()
+for f in ${all_go[@]+"${all_go[@]}"}; do
+	case $f in
+	*_test.go) ;;
+	*) src_go+=("$f") ;;
+	esac
+done
+
+scan_cs "(errors\.New|fmt\.Errorf)\(\"$LEAD" \
+	'Error string starts with a flag name, acronym, or hyphenated word; fang will title-case it (e.g. "--schema" -> "--Schema"). Reword the first word:' \
+	${src_go[@]+"${src_go[@]}"}
+
+scan_cs ", \"$LEAD[^\"]*\"\)" \
+	'Flag usage string starts with a flag name, acronym, or hyphenated word; fang will title-case it (e.g. "API key" -> "Api key"). Reword the first word:' \
+	${src_go[@]+"${src_go[@]}"}
 
 if [ "$fail" -eq 0 ]; then
 	echo "lint-copy: clean"

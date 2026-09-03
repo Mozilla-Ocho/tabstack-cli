@@ -79,6 +79,24 @@ func (r Renderer) PrintMarkdown(resp client.ExtractMarkdownResponse) error {
 	return err
 }
 
+// PrintRaw writes a document body and nothing else: no styling, no header, no
+// JSON envelope, and deliberately **the same in either output mode**. It backs
+// `extract markdown --raw`, whose whole purpose is to produce the artifact the
+// user asked for when stdout is redirected. Mode-awareness is what makes
+// `> page.md` yield JSON, so raw output must not consult the mode.
+//
+// The body is emitted with exactly one trailing newline, so a redirect gives a
+// well-formed text file and `$(...)` capture (which strips trailing newlines)
+// behaves. Empty content writes nothing at all rather than a lone newline: an
+// empty page should produce an empty file.
+func (r Renderer) PrintRaw(body string) error {
+	if body == "" {
+		return nil
+	}
+	_, err := fmt.Fprintln(r.Out, strings.TrimRight(body, "\n"))
+	return err
+}
+
 // RenderEvent prints a single streamed SSE event. In JSON mode it emits one
 // NDJSON line per event so a stream becomes a clean line-delimited log. In
 // pretty mode it formats a timeline line styled by event type.

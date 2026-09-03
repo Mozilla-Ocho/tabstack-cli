@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -19,8 +18,9 @@ const maxInstructionsLen = 20000
 // and leaves room for future generate methods.
 func newGenerateCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "generate",
-		Short: "Fetch a URL and transform its content with AI",
+		Use:     "generate",
+		Short:   "Fetch a URL and transform its content with AI",
+		Example: "  tabstack generate json https://example.com \\\n    --instructions \"summarise in three bullets\" --schema '{\"type\":\"object\"}'",
 	}
 	cmd.AddCommand(newGenerateJSONCmd())
 	return cmd
@@ -45,20 +45,24 @@ func newGenerateJSONCmd() *cobra.Command {
 			"--instructions and --schema accept a literal string, @file, or - for\n" +
 			"stdin (only one may read stdin per invocation). Alternatively reference a\n" +
 			"schema you pulled with `tabstack schema pull` via --schema-name.",
-		Args: cobra.ExactArgs(1),
+		Example: "  # Transform a page into a shape you describe\n  tabstack generate json https://example.com \\\n    --instructions \"summarise this page in three bullet points\" \\\n    --schema '{\"type\":\"object\",\"properties\":{\"bullets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}'\n\n  # Long instructions from a file, schema from the library\n  tabstack generate json https://example.com \\\n    --instructions @prompt.txt --schema-name news-article",
+		Args:    exactArgsNamed("<url>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validURL(args[0]); err != nil {
+				return withCode(2, err)
+			}
 			if instructions == "-" && schema == "-" {
 				return withCode(2, fmt.Errorf(
-					"--schema and --instructions cannot both read from stdin (-); "+
+					"only one flag can read stdin, but --schema and --instructions both got -; "+
 						"pass one as a literal string or @file",
 				))
 			}
-			instr, err := readInput(instructions)
+			instr, err := readInput(instructions, "--instructions")
 			if err != nil {
 				return withCode(2, err)
 			}
 			if instr == "" {
-				return withCode(2, fmt.Errorf("--instructions is required"))
+				return withCode(2, fmt.Errorf("the --instructions flag is required"))
 			}
 			if err := checkLen("instructions", instr, maxInstructionsLen); err != nil {
 				return err
@@ -69,7 +73,7 @@ func newGenerateJSONCmd() *cobra.Command {
 				return err
 			}
 
-			if err := validEffort(effort); err != nil {
+			if err := validFetchFlags(effort, geo); err != nil {
 				return withCode(2, err)
 			}
 
@@ -82,7 +86,7 @@ func newGenerateJSONCmd() *cobra.Command {
 				NoCache:      nocache,
 			}
 
-			out, err := rootApp.client.GenerateJSON(context.Background(), req)
+			out, err := rootApp.client.GenerateJSON(cmd.Context(), req)
 			if err != nil {
 				return classifyError(err)
 			}
@@ -96,8 +100,9 @@ func newGenerateJSONCmd() *cobra.Command {
 	f.StringVar(&schemaName, "schema-name", "", "name of a pulled schema to use (see `tabstack schema pull`)")
 	f.StringVar(&storage, "storage", "", "schema store directory for --schema-name (default: config dir)")
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
+	_ = cmd.RegisterFlagCompletionFunc("effort", fixedCompletions("min", "standard", "max"))
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
-	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addNoCacheFlag(f, &nocache)
 	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd

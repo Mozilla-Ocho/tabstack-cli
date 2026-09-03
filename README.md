@@ -14,6 +14,8 @@ It turns any URL into clean Markdown or schema-shaped JSON, runs natural-languag
 browser automation, and answers research questions with cited sources, all with
 output that's pretty in a terminal and pipeable into `jq`.
 
+**Docs:** <https://docs.tabstack.ai> · **Command reference:** [`docs/`](docs/README.md) · **Issues:** [report a bug](https://github.com/Mozilla-Ocho/tabstack-cli/issues/new)
+
 ```console
 $ tabstack extract markdown https://example.com --metadata
 Example Domain
@@ -31,10 +33,15 @@ This domain is for use in illustrative examples in documents...
 - [Quick start](#quick-start)
 - [Authentication](#authentication)
 - [Commands](#commands)
+- [Command reference](docs/README.md)
 - [Common options](#common-options)
+- [Shell completion](#shell-completion)
+- [Man page](#man-page)
+- [Uninstalling](#uninstalling)
 - [Output & scripting](#output--scripting)
 - [Exit codes](#exit-codes)
 - [Using tabstack with AI agents](#using-tabstack-with-ai-agents)
+- [Getting help, and reporting bugs](#getting-help-and-reporting-bugs)
 - [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
@@ -145,10 +152,17 @@ tabstack keys list --org acme                       # previews only, never plain
 tabstack keys use <key-id>                          # adopt an existing key into this CLI
 tabstack keys use                                   # pick from a list (or the only one)
 tabstack keys revoke <key-id>                       # also clears it from your config
+tabstack keys revoke <key-id> --yes                 # skip the confirmation prompt
 ```
 
 Keys created by the CLI are named `cli-<hostname>` by default, so they are
 legible when you come to revoke one in the console.
+
+Revoking is irreversible and breaks anything still sending that key, so
+`keys revoke`, `auth logout --all`, and `auth sessions --revoke` ask before
+acting. Pass `--yes` to skip the prompt; on a non-interactive terminal they
+refuse with exit 2 rather than proceeding unasked. (`--force`, on
+`schema pull`, is a different thing: it overwrites a local file.)
 
 `keys use` reveals one of the organisation's existing keys and stores it as the
 one this CLI sends, replacing whatever was stored. Pass a key id (from
@@ -164,6 +178,10 @@ Resolved in this order, highest precedence first:
 3. the stored key for a `--org` override, when given
 4. the stored key for the active org
 5. a key from a pre-organisation config, only while no org is active
+
+**Prefer the environment variable in CI.** A key passed as `--api-key` lands in
+your shell history and is visible to anyone who can run `ps` on the machine
+while the command is in flight. `TABSTACK_API_KEY` avoids both.
 
 If `TABSTACK_API_KEY` is set it wins, and `auth status` says so explicitly rather
 than showing a stored org key that is not actually being used. If nothing
@@ -203,6 +221,53 @@ would go out if I switched".
 | Product API | `base_url` | `TABSTACK_BASE_URL` | `--base-url` |
 | Auth and management | `auth_url` | `TABSTACK_AUTH_URL` | `--auth-url` |
 
+Settings resolve flags first, then environment variables, then a project
+`.tabstack.toml`, then your own config file, then the built-in default.
+
+Two more environment variables have no config or flag equivalent:
+`TABSTACK_OAUTH_SCOPES` overrides the scopes requested at login (provisional,
+and unlikely to be needed), and `NO_COLOR` disables colour.
+
+### Project settings
+
+A repository can pin the settings everyone working in it should share, in a
+`.tabstack.toml` at its root:
+
+```toml
+# .tabstack.toml
+active_org  = "acme"       # which of *your* organisations this repo works against
+storage     = "./schemas"  # relative to this file, not your shell
+concurrency = 8
+retries     = 5
+effort      = "max"
+```
+
+It is found by searching upwards from the working directory, so it applies from
+anywhere in the repository, and the search stops at the repository root or your
+home directory. Precedence is flags, then environment, then this file, then your
+own config, so an explicit flag always wins.
+
+**A project file cannot carry a credential or an endpoint.** It arrives by
+`git clone`, so anything it could set is something a repository author could set
+on your machine. `api_key`, `session`, and `orgs` are rejected because a project
+file is the file you commit; `base_url` and `auth_url` are rejected because they
+decide *where your key is sent*, and honouring them from a cloned repository
+would turn `git clone` into credential exfiltration. Those stay on `--base-url`
+and `TABSTACK_BASE_URL`, for development.
+
+Setting one is an error naming the key, not a silent omission: someone who wrote
+`api_key` there believes it is working and may be about to commit it. An unknown
+key is an error too, so a typo does not fail quietly.
+
+| | |
+|---|---|
+| Allowed | `active_org`, `storage`, `output`, `effort`, `geo`, `timeout`, `max_duration`, `concurrency`, `retries` |
+| Rejected | `api_key`, `legacy_api_key`, `session`, `orgs`, `base_url`, `auth_url` |
+
+`tabstack config show` reports the file it found and what it contributed. For a
+reproducible CI run, `TABSTACK_NO_PROJECT_CONFIG=1` ignores project config
+entirely, and `TABSTACK_PROJECT_CONFIG=/path` uses one specific file.
+
 ### Upgrading from a pre-organisation config
 
 If you already have a config file holding a single `api_key`, it keeps working.
@@ -222,10 +287,15 @@ it cannot leave you with nothing that works. `--force` overrides that.
 
 ## Commands
 
+> **Full reference:** [`docs/`](docs/README.md) has a page per command group,
+> documenting every flag, worked examples, and the exact `--output json` shape.
+> This section is the tour; those pages are the detail.
+
+
 | Command | What it does |
 |---------|--------------|
-| `tabstack extract markdown <url>` | Convert a page to clean Markdown |
-| `tabstack extract json <url> --schema …` | Extract structured data shaped by a JSON schema |
+| `tabstack extract markdown <url>...` | Convert one or more pages to clean Markdown |
+| `tabstack extract json <url>... --schema …` | Extract structured data shaped by a JSON schema |
 | `tabstack generate json <url> --instructions … --schema …` | Fetch a page and transform it with AI into your schema |
 | `tabstack agent automate <task> [--url …]` | Run a natural-language browser-automation task (streams) |
 | `tabstack agent research <query>` | Research the web and print a cited report (streams) |
@@ -254,6 +324,9 @@ Run `tabstack <command> --help` for the full flag list on any command.
 # Convert a page to clean Markdown (add --metadata for title/author/etc.)
 tabstack extract markdown https://example.com --metadata
 
+# Write the Markdown itself to a file (--raw skips the JSON envelope)
+tabstack extract markdown https://example.com --raw > page.md
+
 # Extract structured data shaped by a JSON schema
 tabstack extract json https://example.com --schema @schema.json
 tabstack extract json https://example.com --schema '{"type":"object","properties":{"title":{"type":"string"}}}'
@@ -261,6 +334,19 @@ tabstack extract json https://example.com --schema '{"type":"object","properties
 # …or reference a schema you pulled with `tabstack schema pull` by name
 tabstack extract json https://example.com --schema-name job-posting
 ```
+
+A schema describes the **shape** you want, not the values. This is the common
+first mistake:
+
+```jsonc
+{"title": "string"}                                        // wrong: example values
+{"type":"object","properties":{"title":{"type":"string"}}} // right: a shape
+```
+
+If a schema has no `type` or `properties` key the CLI prints a hint to stderr
+and **sends the request anyway**, since schemas are validated server-side and a
+local guess should never block a call that would have worked. Browse ready-made
+schemas with `tabstack schema list`.
 
 ### Generate
 
@@ -420,7 +506,8 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 
 **`--geo <CC>`**: route the fetch through a given country (ISO 3166-1 alpha-2, e.g. `GB`, `US`, `JP`).
 
-**`--nocache`**: bypass the cache and fetch fresh.
+**`--no-cache`**: bypass the cache and fetch fresh. The older spelling
+`--nocache` still works as a hidden alias, so existing scripts keep running.
 
 **Global flags** (valid on every command):
 
@@ -432,8 +519,150 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--auth-url <url>` | Auth and management host URL |
 | `-o, --output pretty\|json` | Force an output mode (default: auto-detect) |
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
-| `--timeout <dur>` | Request timeout for non-streaming calls, e.g. `30s` |
+| `--timeout <dur>` | Request timeout for non-streaming calls (default `2m`); `0` disables |
+| `--retries <n>` | Retry transient failures this many times (default `2`); `0` disables |
+| `--max-duration <dur>` | Bound a whole stream (`agent automate`, `agent research`); unset by default |
+| `--concurrency <n>` | URLs to fetch at once in a batch (default `4`) |
+| `--output-dir <dir>` | Write one file per URL instead of stdout |
+| `--batch` | Always use the per-URL envelope, even for one URL |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
+
+Failures carry their own diagnostics. An exit-3 error keeps the
+`api error (NNN): <message>` core and appends guidance for the statuses where
+there is something specific to do: `401` points at re-authentication, `403` at
+organisation scoping, and `429` reports `Retry-After` when the server sent one.
+When the response carried an `x-trace-id`, the error ends with
+`(trace id <id>)`, so the id to quote in a support request is on the failure
+itself rather than only under `--debug`.
+
+### Batches
+
+`extract markdown` and `extract json` take **several URLs**, or `-` to read a
+newline-delimited list from stdin. This is the shape most CI pipelines need, and
+until now everyone wrote the same `xargs` wrapper by hand.
+
+```bash
+tabstack extract markdown https://a.com https://b.com https://c.com
+tabstack extract json - --schema-name job-posting < urls.txt
+```
+
+Passing `-` when nothing is piped in is an error rather than a wait, so a
+forgotten pipe fails immediately instead of looking like a hang.
+
+A list on stdin skips blank lines and `#` comments, so it can live in the repo
+with notes in it. Duplicate URLs are fetched once. Every URL is validated before
+any request goes out, so a typo costs nothing.
+
+**Output.** A single URL prints exactly what it always did, so existing scripts
+are unaffected. Several URLs emit one NDJSON envelope per line, in **input
+order** regardless of which finished first, so the output is diffable:
+
+```json
+{"url":"https://a.com","ok":true,"result":{"content":"# A","url":"https://a.com"}}
+{"url":"https://b.com","ok":false,"error":{"code":3,"message":"api error (404): Not Found"}}
+```
+
+Pass `--batch` to get that envelope even for one URL, so a wrapper script always
+parses one shape.
+
+**Files.** `--output-dir` writes one file per URL as each finishes:
+
+```bash
+tabstack extract markdown - --output-dir ./pages < urls.txt
+# ./pages/example.com_blog_post-1-b2117d83.md
+```
+
+The name is `<host-and-path>-<hash>.<ext>`, where the hash is the first eight
+hex of the URL's SHA-256. It is always present, so a filename is a pure function
+of its URL: adding a URL to the list never renames anyone else's file, which is
+what makes repeat runs idempotent. An existing file is refused unless `--force`
+is given.
+
+`--raw` with more than one URL would run the documents together on stdout, so it
+is refused with exit `2` unless `--output-dir` is set.
+
+**Concurrency** defaults to 4, tunable with `--concurrency`. Retries apply per
+URL, and the jittered backoff is what keeps parallel workers from retrying in
+lockstep after a shared rate limit.
+
+**Exit codes.** `0` only when every URL succeeded, otherwise `3`, with
+successful results still written and a per-URL summary on stderr. A local
+problem (bad URL, flag conflict) is still `2` and happens before any request.
+
+A worked CI step:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Refresh a docs mirror. Exits non-zero if any page failed, but keeps
+# whatever did succeed, so a single dead link does not lose the run.
+if ! tabstack extract markdown - \
+      --output-dir ./mirror --force --concurrency 8 < urls.txt
+then
+  echo "some pages failed; see the summary above" >&2
+  exit 1
+fi
+```
+
+### Cancelling, and bounding a long run
+
+Ctrl-C (or `SIGTERM`) cancels the request in flight rather than killing the
+process mid-call, so the server is told to stop. The CLI prints `cancelled` to
+stderr and exits `1`.
+
+Streaming commands can also be bounded up front:
+
+```bash
+tabstack agent automate "$task" --url "$url" --max-duration 10m
+tabstack agent research "$query" --max-duration 2m
+```
+
+On expiry the command reports the elapsed time and the flag that stopped it,
+and exits `1`. This matters most in CI, where a stalled run would otherwise
+burn the entire job timeout.
+
+`--max-duration` and `--timeout` are different things and do not overlap:
+
+| Flag | Applies to | Bounds |
+|---|---|---|
+| `--timeout` | `extract`, `generate`, `agent input` | one non-streaming request, default `2m` |
+| `--max-duration` | `agent automate`, `agent research` | the whole stream, unset by default |
+
+A hard `--timeout` on a stream would cut it off mid-flight, which is why it has
+never applied there.
+
+### Retries
+
+Transient failures are retried automatically, twice by default, matching the
+Tabstack SDKs. Without this the CLI was the least reliable way to call the API
+despite being the one aimed at CI: a 429 the Python client absorbs silently
+would fail a build.
+
+Only failures that repeating can fix are retried: **408, 409, 429, and 5xx**. A
+`400` or `404` means the request itself is wrong, so it fails immediately rather
+than multiplying the cost of a mistake.
+
+Backoff is exponential with full jitter, so several CLI invocations in the same
+CI job do not retry in lockstep and collide again. A `Retry-After` header wins
+over the computed backoff, capped so a mistaken `Retry-After: 86400` cannot
+stall a build. Retries share the `--timeout` deadline and the process context,
+so they can never extend either, and Ctrl-C ends them at once.
+
+```bash
+tabstack extract markdown "$url" --retries 5   # flaky network
+tabstack extract markdown "$url" --retries 0   # fail fast, one attempt
+```
+
+Each retry prints a line to stderr so a slow command is explicable rather than
+looking hung. Under `--output json` that line is suppressed unless `--debug` is
+also set, keeping machine-facing stderr quiet.
+
+**Streaming commands are different.** `automate` and `research` retry only while
+*establishing* the stream: a non-2xx or a connection failure arrives before any
+event, so replaying it is safe. Once the server answers, the task is running and
+the stream is never replayed, because there is no way to do so without either
+repeating events you have already seen or dropping ones you have not.
 
 **`--debug`**: for each API call, print a line to **stderr** (so it never
 touches piped stdout) with the HTTP status, elapsed time to first byte, the
@@ -445,18 +674,134 @@ $ tabstack extract markdown https://example.com --debug
 debug POST 200 359ms  trace=e1923436412e811be9fe229131cb0694  ratelimit=999/1000 (resets in 20s)
 ```
 
+## Shell completion
+
+Completion covers subcommands, enum flag values (`--effort`, `--mode`,
+`--output`, `--api-key-setup`), your organisations (`--org`, `auth switch`), and
+the schema library and local store (`schema pull`, `--schema-name`,
+`schema rm`, `schema path`).
+
+**bash** (needs `bash-completion`):
+
+```bash
+tabstack completion bash > /etc/bash_completion.d/tabstack           # system-wide
+tabstack completion bash > ~/.local/share/bash-completion/completions/tabstack
+```
+
+**zsh** (anywhere on your `$fpath`):
+
+```bash
+tabstack completion zsh > "${fpath[1]}/_tabstack"
+```
+
+If completion is not already enabled, add `autoload -U compinit; compinit` to
+`~/.zshrc` first. Restart your shell afterwards.
+
+**fish**:
+
+```bash
+tabstack completion fish > ~/.config/fish/completions/tabstack.fish
+```
+
+**PowerShell**:
+
+```powershell
+tabstack completion powershell | Out-String | Invoke-Expression
+```
+
+Add that line to your profile to make it permanent. Run
+`tabstack completion <shell> --help` for the per-shell notes.
+
+## Man page
+
+`tabstack man` writes a roff man page to stdout. Install it where your system
+looks:
+
+```bash
+# macOS and most Linux distributions
+sudo mkdir -p /usr/local/share/man/man1
+tabstack man | sudo tee /usr/local/share/man/man1/tabstack.1 > /dev/null
+man tabstack
+```
+
+For a user-local install with no `sudo`:
+
+```bash
+mkdir -p ~/.local/share/man/man1
+tabstack man > ~/.local/share/man/man1/tabstack.1
+man tabstack   # add ~/.local/share/man to MANPATH if your system does not search it
+```
+
 ## Output & scripting
 
 Output is **pretty** (styled, human-readable) on a terminal and **JSON** when
 piped, so it composes with tools like `jq` without a flag:
 
 ```bash
-tabstack extract markdown https://example.com | jq .
+tabstack extract markdown https://example.com | jq -r .content
 ```
+
+Note what that example implies: piping `extract markdown` gives you the **JSON
+response envelope**, not the Markdown. `.content` is the Markdown; `.url` and
+`.metadata` sit alongside it.
 
 Force a mode with `-o/--output pretty|json`, or disable colour with `--no-color`
 (or the `NO_COLOR` env var). Streaming commands (`automate`, `research`) emit one
 NDJSON line per event in JSON mode.
+
+### Getting Markdown into a file
+
+Because the mode auto-detects, a plain redirect is not a terminal and so writes
+the JSON envelope into your `.md` file:
+
+```bash
+tabstack extract markdown https://example.com > page.md   # this is JSON, not Markdown
+```
+
+Pass **`--raw`** to print the document body and nothing else: no metadata
+header, no styling, no envelope, in either output mode.
+
+```bash
+tabstack extract markdown https://example.com --raw > page.md
+tabstack extract markdown https://example.com --raw | pbcopy
+body=$(tabstack extract markdown https://example.com --raw)
+```
+
+If you would rather not learn a flag, pull the field out of the envelope
+instead. The two are equivalent:
+
+```bash
+tabstack extract markdown https://example.com | jq -r .content > page.md
+```
+
+`--raw` emits exactly one trailing newline, so a redirect yields a well-formed
+text file and `$(...)` capture behaves. It cannot be combined with `--metadata`,
+which would contradict it; that fails with exit `2`. `-o pretty` is not a
+substitute, because it still prepends the styled metadata header.
+
+**Every command honours `--output`**, not just the ones that fetch. `auth`,
+`keys`, `config`, and `schema` all emit structured objects, so account and
+configuration state is scriptable too:
+
+```bash
+tabstack auth status -o json   | jq -r .active_org
+tabstack config show -o json   | jq -r '.orgs[] | select(.active) | .api_key_name'
+tabstack keys list -o json     | jq -r '.[] | select(.stored_in_cli) | .id'
+tabstack schema list --local -o json | jq -r '.[].path'
+tabstack schema pull job-posting -o json | jq -r '.pulled[]'
+```
+
+Secrets stay redacted in JSON exactly as in pretty output; `keys create` is the
+only command that ever prints a key in full, because that is the one moment the
+API returns it.
+
+**stdout is results, stderr is everything else.** Progress lines, prompts, the
+acting-organisation notice, and warnings all go to stderr, so a pipe only ever
+receives data. `tabstack schema pull job-posting 2>/dev/null` yields the summary
+alone.
+
+The exact JSON shape of every command is documented in
+[`docs/`](docs/README.md).
 
 > **Note:** streaming events are parsed with a 4&nbsp;MB per-event buffer. A
 > single event whose payload exceeds that (e.g. an extremely large extracted
@@ -476,8 +821,10 @@ These make the CLI scriptable: branch on the exit status to tell a bad request
 from a network failure from an API rejection:
 
 ```bash
-if ! tabstack extract markdown "$url" > out.md; then
-  case $? in
+tabstack extract markdown "$url" --raw > out.md
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  case "$rc" in
     2) echo "check your arguments" ;;
     3) echo "the API rejected the request" ;;
     *) echo "network or runtime error" ;;
@@ -491,6 +838,66 @@ fi
 wiring it into an agent (Claude Code, a custom harness, etc.), point the agent at
 [AGENTS.md](AGENTS.md). It documents every command, flag, and exit code in a
 form tuned for machine consumption.
+
+## Uninstalling
+
+**Revoke your credentials first.** Deleting the local files removes your copy
+of a key, not the key itself: it stays valid server-side until revoked.
+
+```bash
+tabstack keys list                 # note the id of the key this CLI stores
+tabstack keys revoke <key-id>      # revoke it server-side
+tabstack auth logout               # or --all to end every session
+```
+
+Then remove the binary, matching how you installed it:
+
+```bash
+sudo rm /usr/local/bin/tabstack    # install.sh, or `make install-local`
+rm "$(go env GOPATH)/bin/tabstack" # go install
+```
+
+Then the configuration and schema store, which live in one directory:
+
+```bash
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/tabstack"
+```
+
+That directory holds `config.toml` (your session and any stored API keys) and
+`schemas/` (pulled schemas plus their manifest and index cache). Nothing is
+written anywhere else.
+
+Finally, anything you installed by hand from the sections above:
+
+```bash
+rm -f ~/.local/share/bash-completion/completions/tabstack
+rm -f /etc/bash_completion.d/tabstack
+rm -f "${fpath[1]}/_tabstack"                       # zsh
+rm -f ~/.config/fish/completions/tabstack.fish
+sudo rm -f /usr/local/share/man/man1/tabstack.1
+rm -f ~/.local/share/man/man1/tabstack.1
+```
+
+A project `.tabstack.toml` belongs to its repository, so leave it be.
+
+## Getting help, and reporting bugs
+
+`tabstack --help` carries the links; the short version:
+
+| | |
+|---|---|
+| Docs | <https://docs.tabstack.ai> |
+| Source | <https://github.com/Mozilla-Ocho/tabstack-cli> |
+| Report a bug | <https://github.com/Mozilla-Ocho/tabstack-cli/issues/new> |
+| Report a vulnerability | see [SECURITY.md](SECURITY.md), **not** a public issue |
+| Man page | `tabstack man` |
+
+When a command fails in a way the CLI cannot explain, it prints what a bug
+report needs: the version, your platform, and the command you ran with any
+credential removed. Re-run with `--debug` to add the request id and timing.
+
+Failures the CLI *can* explain do not print that footer, so a refused
+connection or a rejected request stays quiet.
 
 ## Development
 

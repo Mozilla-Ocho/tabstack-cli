@@ -38,7 +38,8 @@ func newMCPCmd() *cobra.Command {
 			"active organisation on startup. Sign in first with `tabstack auth login`,\n" +
 			"or set TABSTACK_API_KEY for a non-interactive setup.\n\n" +
 			"stdout carries the JSON-RPC protocol; logs go to stderr.",
-		Args:         cobra.NoArgs,
+		Example:      "  # Run the server (an MCP client normally launches this for you)\n  tabstack mcp\n\n  # Claude Desktop / IDE config entry:\n  #   \"tabstack\": { \"command\": \"tabstack\", \"args\": [\"mcp\"] }",
+		Args:         noArgsNamed(),
 		Annotations:  map[string]string{"skipClient": "true"},
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,6 +59,12 @@ func runMCP(ctx context.Context) error {
 	var opts []client.Option
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
+	}
+	opts = append(opts, client.WithRetries(flagRetries))
+	// Diagnostics go to stderr, which is safe here: the stdio invariant only
+	// reserves stdout for JSON-RPC frames.
+	if flagDebug {
+		opts = append(opts, client.WithDebug(debugSink(rootApp.renderer, nil)))
 	}
 	product := client.New(apiKey, rootApp.cfg.ResolveBaseURL(flagBaseURL), opts...)
 

@@ -28,6 +28,7 @@ func newAuthCmd() *cobra.Command {
 		Long: "Manage the user-scoped session used for sign-in and organisation\n" +
 			"management. API keys themselves are organisation scoped and managed\n" +
 			"with `tabstack keys`.",
+		Example: "  tabstack auth login\n  tabstack auth status\n  tabstack auth switch acme",
 	}
 	cmd.AddCommand(
 		newAuthLoginCmd(),
@@ -43,11 +44,16 @@ func newAuthStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "status",
 		Short:       "Show who you are signed in as and which credential is in play",
+		Example:     "  # Who you are, which org you are acting as, which key is in play\n  tabstack auth status\n\n  # Scriptable: the active organisation id\n  tabstack auth status -o json | jq -r .active_org",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
 			cfg := rootApp.cfg
 			k := r.Styles.Key
+
+			if jsonMode(r) {
+				return emitJSON(r, authStatusJSON(cfg, rootApp.store.Path()))
+			}
 
 			// 1. Identity.
 			if cfg.Session == nil || cfg.Session.AccessToken == "" {
@@ -154,6 +160,77 @@ func printKeyState(r uiRenderer, cfg *config.Config) {
 	}
 }
 
+// actionJSON is the machine-readable acknowledgement for commands whose pretty
+// output is a single confirmation line. Keeping one shape across them means a
+// script can branch on .ok without learning a type per command.
+type actionJSON struct {
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	ID     string `json:"id,omitempty"`
+	Org    string `json:"org,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// statusJSON is the machine-readable form of `auth status`. Declared rather
+// than assembled from a map so the shape is reviewable in one place and stable
+// for scripts. Secrets stay redacted exactly as in pretty mode: there is no
+// output mode that prints a credential in full.
+type statusJSON struct {
+	SignedIn       bool    `json:"signed_in"`
+	Email          string  `json:"email,omitempty"`
+	SessionExpiry  *string `json:"session_expires_at,omitempty"`
+	SessionExpired bool    `json:"session_expired"`
+	ActiveOrg      string  `json:"active_org,omitempty"`
+	ActiveOrgName  string  `json:"active_org_name,omitempty"`
+	APIKeyStored   bool    `json:"api_key_stored"`
+	APIKeyPreview  string  `json:"api_key_preview,omitempty"`
+	APIKeyName     string  `json:"api_key_name,omitempty"`
+	APIKeyLegacy   bool    `json:"api_key_from_legacy_config"`
+	EnvOverride    bool    `json:"env_override"`
+	ConfigPath     string  `json:"config_path"`
+	ConfigPerms    string  `json:"config_permissions,omitempty"`
+	PermsOK        bool    `json:"config_permissions_ok"`
+}
+
+// authStatusJSON builds statusJSON from config. It mirrors the pretty-mode
+// branches in printKeyState and printExpiry; keep the two in step.
+func authStatusJSON(cfg *config.Config, path string) statusJSON {
+	out := statusJSON{
+		ActiveOrg:   cfg.ActiveOrg,
+		EnvOverride: os.Getenv(config.EnvAPIKey) != "",
+		ConfigPath:  path,
+	}
+	if cfg.ActiveOrg != "" {
+		out.ActiveOrgName = cfg.OrgName(cfg.ActiveOrg)
+	}
+	if cfg.Session != nil && cfg.Session.AccessToken != "" {
+		out.SignedIn = true
+		out.Email = cfg.Session.UserEmail
+		if !cfg.Session.ExpiresAt.IsZero() {
+			at := cfg.Session.ExpiresAt.UTC().Format(time.RFC3339)
+			out.SessionExpiry = &at
+			out.SessionExpired = time.Until(cfg.Session.ExpiresAt) <= 0
+		}
+	}
+	switch {
+	case cfg.ActiveOrg == "" && cfg.LegacyAPIKey != "":
+		out.APIKeyStored = true
+		out.APIKeyLegacy = true
+		out.APIKeyPreview = config.Redact(cfg.LegacyAPIKey)
+	case cfg.ActiveOrg != "" && cfg.HasKey(cfg.ActiveOrg):
+		o := cfg.Org(cfg.ActiveOrg)
+		out.APIKeyStored = true
+		out.APIKeyPreview = config.Redact(o.APIKey)
+		out.APIKeyName = o.APIKeyName
+	}
+	mode, exists, ok := config.PermissionsState(path)
+	out.PermsOK = ok
+	if exists {
+		out.ConfigPerms = fmt.Sprintf("%#o", mode)
+	}
+	return out
+}
+
 // checkKeyRevoked verifies the stored key id still exists for the active org. A
 // key revoked in the console keeps working in config until something asks, and
 // "401 from the API" is a poor way to find out.
@@ -184,21 +261,38 @@ func checkKeyRevoked(ctx context.Context, r uiRenderer, cfg *config.Config) erro
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	var all bool
+	var (
+		all bool
+		yes bool
+	)
 
 	cmd := &cobra.Command{
 		Use:         "logout",
 		Short:       "Revoke this session (or all of them) and clear it locally",
+		Example:     "  # Revoke this session only\n  tabstack auth logout\n\n  # Revoke every session, on every machine (asks first)\n  tabstack auth logout --all --yes",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
 			if rootApp.cfg.Session == nil || rootApp.cfg.Session.AccessToken == "" {
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "logout", OK: true, Note: "not signed in"})
+				}
 				fmt.Fprintln(r.Out, "not signed in")
 				return nil
 			}
 
 			c, sm := consoleClient()
 			ctx := cmd.Context()
+
+			// Signing this session out is routine and reversible by signing in
+			// again. --all reaches every other machine the user is signed in on,
+			// so that one is confirmed.
+			if all {
+				ok, err := confirmDestructive(r, "revoke every session for your user, on all machines", yes)
+				if err != nil || !ok {
+					return err
+				}
+			}
 
 			var err error
 			if all {
@@ -217,8 +311,13 @@ func newAuthLogoutCmd() *cobra.Command {
 			}
 
 			what := "session revoked"
+			action := "logout"
 			if all {
 				what = "all sessions revoked"
+				action = "logout_all"
+			}
+			if jsonMode(r) {
+				return emitJSON(r, actionJSON{Action: action, OK: true})
 			}
 			fmt.Fprintf(r.Out, "%s %s\n", r.Styles.Success.Render("✓"), what)
 			fmt.Fprintln(r.Out, r.Styles.Muted.Render("stored API keys were left in place; remove them with `tabstack keys revoke <id>`"))
@@ -227,15 +326,20 @@ func newAuthLogoutCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "revoke every session for your user, not just this one")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt for --all")
 	return cmd
 }
 
 func newAuthSessionsCmd() *cobra.Command {
-	var revoke string
+	var (
+		revoke string
+		yes    bool
+	)
 
 	cmd := &cobra.Command{
 		Use:         "sessions",
 		Short:       "List your CLI sessions",
+		Example:     "  # List your CLI sessions; the current one is marked\n  tabstack auth sessions\n\n  # Revoke one by id\n  tabstack auth sessions --revoke sess_abc123",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
@@ -246,8 +350,15 @@ func newAuthSessionsCmd() *cobra.Command {
 			ctx := cmd.Context()
 
 			if revoke != "" {
+				ok, err := confirmDestructive(r, fmt.Sprintf("revoke session %s", revoke), yes)
+				if err != nil || !ok {
+					return err
+				}
 				if err := c.RevokeSession(ctx, revoke); err != nil {
 					return classifyConsoleError(err)
+				}
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "session_revoked", ID: revoke, OK: true})
 				}
 				fmt.Fprintf(r.Out, "%s session %s revoked\n", r.Styles.Success.Render("✓"), revoke)
 				return nil
@@ -256,6 +367,11 @@ func newAuthSessionsCmd() *cobra.Command {
 			sessions, err := c.Sessions(ctx)
 			if err != nil {
 				return classifyConsoleError(err)
+			}
+			if jsonMode(r) {
+				// Emit the server's own shape: these are already flat records
+				// with json tags, so there is nothing to restate.
+				return emitJSON(r, sessions)
 			}
 			if len(sessions) == 0 {
 				fmt.Fprintln(r.Out, r.Styles.Muted.Render("no active sessions"))
@@ -282,6 +398,7 @@ func newAuthSessionsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&revoke, "revoke", "", "revoke a session by id")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt for --revoke")
 	return cmd
 }
 

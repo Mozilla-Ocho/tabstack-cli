@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -24,8 +26,9 @@ const maxQueryLen = 10000
 // is a plain request/response.
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Run AI browser-automation and research tasks",
+		Use:     "agent",
+		Short:   "Run AI browser-automation and research tasks",
+		Example: "  tabstack agent automate \"search for a product and open the first result\" --url https://example.com\n  tabstack agent research \"what changed in HTTP/3 in 2024?\"",
 	}
 	cmd.AddCommand(newAutomateCmd(), newResearchCmd(), newInputCmd())
 	return cmd
@@ -178,6 +181,7 @@ func newAutomateCmd() *cobra.Command {
 		maxValidation int
 		geo           string
 		interactive   bool
+		maxDuration   time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -190,13 +194,23 @@ func newAutomateCmd() *cobra.Command {
 			"workflows.\n\n" +
 			"Pass --interactive to let the task pause and request input mid-run; when\n" +
 			"it does, respond with `tabstack agent input <request-id>`.",
-		Args: cobra.ExactArgs(1),
+		Example: "  # Run a task, streaming progress as it works\n  tabstack agent automate \"find the pricing page and list the plans\" --url https://example.com\n\n  # Supply context for a form\n  tabstack agent automate \"fill in the contact form\" --url https://example.com/contact \\\n    --data '{\"name\":\"Ada\",\"email\":\"ada@example.com\"}'\n\n  # Let the task pause to ask you something mid-run\n  tabstack agent automate \"book the cheapest flight\" --url https://example.com --interactive\n\n  # Constrain how hard it tries\n  tabstack agent automate \"find the careers page\" --url https://example.com --max-iterations 10",
+		Args:    exactArgsNamed("<task>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validGeo(geo); err != nil {
+				return withCode(2, err)
+			}
+			// --url is optional; only check it when the caller supplied one.
+			if url != "" {
+				if err := validURL(url); err != nil {
+					return withCode(2, err)
+				}
+			}
 			if maxIter != 0 && (maxIter < 1 || maxIter > 100) {
-				return withCode(2, fmt.Errorf("--max-iterations must be between 1 and 100 (got %d)", maxIter))
+				return withCode(2, fmt.Errorf("max iterations must be between 1 and 100 (--max-iterations got %d)", maxIter))
 			}
 			if maxValidation != 0 && (maxValidation < 1 || maxValidation > 10) {
-				return withCode(2, fmt.Errorf("--max-validation-attempts must be between 1 and 10 (got %d)", maxValidation))
+				return withCode(2, fmt.Errorf("max validation attempts must be between 1 and 10 (--max-validation-attempts got %d)", maxValidation))
 			}
 			req := client.AutomateRequest{
 				Task:                  args[0],
@@ -210,18 +224,22 @@ func newAutomateCmd() *cobra.Command {
 
 			// --data is optional freeform JSON context.
 			if dataSpec != "" {
-				raw, err := readJSON(dataSpec)
+				raw, err := readJSON(dataSpec, "--data")
 				if err != nil {
 					return withCode(2, err)
 				}
 				req.Data = raw
 			}
 
+			ctx, cancel := streamContext(cmd.Context(), maxDuration)
+			defer cancel()
+
+			start := time.Now()
 			res, err := runStream(func(fn func(client.Event) error) error {
-				return rootApp.client.Automate(context.Background(), req, fn)
+				return rootApp.client.Automate(ctx, req, fn)
 			})
 			if err != nil {
-				return classifyError(err)
+				return classifyStreamError(cmd.Context(), err, maxDuration, time.Since(start))
 			}
 
 			rootApp.renderer.PrintFinalAnswer(res.finalAnswer)
@@ -235,12 +253,13 @@ func newAutomateCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&url, "url", "", "starting URL for the task")
-	f.StringVar(&dataSpec, "data", "", "JSON context: literal, @file, or - for stdin")
+	f.StringVar(&dataSpec, "data", "", "context as JSON: literal, @file, or - for stdin")
 	f.StringVar(&guardrails, "guardrails", "", "safety constraints for execution")
 	f.IntVar(&maxIter, "max-iterations", 0, "maximum task iterations (1-100)")
 	f.IntVar(&maxValidation, "max-validation-attempts", 0, "maximum validation attempts (1-10)")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&interactive, "interactive", false, "allow the task to pause and request input (answer with `agent input`)")
+	f.DurationVar(&maxDuration, "max-duration", 0, maxDurationHelp)
 
 	return cmd
 }
@@ -250,6 +269,7 @@ func newResearchCmd() *cobra.Command {
 		mode         string
 		fetchTimeout int
 		nocache      bool
+		maxDuration  time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -258,7 +278,8 @@ func newResearchCmd() *cobra.Command {
 		Long: "Search the web, analyse sources, and synthesise an answer to a query.\n\n" +
 			"Progress streams through phases as the research runs. --mode fast\n" +
 			"(default) returns quick answers; balanced does deeper multi-source work.",
-		Args: cobra.ExactArgs(1),
+		Example: "  # Quick answer with cited sources\n  tabstack agent research \"what changed in HTTP/3 in 2024?\"\n\n  # Deeper multi-source research\n  tabstack agent research \"compare managed Postgres pricing\" --mode balanced\n\n  # Machine-readable: one JSON event per line, {\"event\":..., \"data\":...}\n  tabstack agent research \"who maintains curl?\" --output json | jq -c .event",
+		Args:    exactArgsNamed("<query>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validResearchMode(mode); err != nil {
 				return withCode(2, err)
@@ -273,11 +294,15 @@ func newResearchCmd() *cobra.Command {
 				NoCache:      nocache,
 			}
 
+			ctx, cancel := streamContext(cmd.Context(), maxDuration)
+			defer cancel()
+
+			start := time.Now()
 			res, err := runStream(func(fn func(client.Event) error) error {
-				return rootApp.client.Research(context.Background(), req, fn)
+				return rootApp.client.Research(ctx, req, fn)
 			})
 			if err != nil {
-				return classifyError(err)
+				return classifyStreamError(cmd.Context(), err, maxDuration, time.Since(start))
 			}
 
 			rootApp.renderer.PrintFinalAnswer(res.finalAnswer)
@@ -291,8 +316,10 @@ func newResearchCmd() *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVar(&mode, "mode", "", "research mode: fast|balanced")
-	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "per-page fetch timeout in seconds")
-	f.BoolVar(&nocache, "nocache", false, "skip cache and force fresh research")
+	_ = cmd.RegisterFlagCompletionFunc("mode", fixedCompletions("fast", "balanced"))
+	f.IntVar(&fetchTimeout, "fetch-timeout", 0, "fetch timeout per page, in seconds")
+	addNoCacheFlag(f, &nocache)
+	f.DurationVar(&maxDuration, "max-duration", 0, maxDurationHelp)
 
 	return cmd
 }
@@ -308,28 +335,29 @@ func newInputCmd() *cobra.Command {
 			"The --data payload must be a JSON object:\n" +
 			"  {\"fields\":[{\"ref\":\"field1\",\"value\":\"answer\"}]}  to provide values\n" +
 			"  {\"cancelled\":true}                                to decline",
-		Args: cobra.ExactArgs(1),
+		Example: "  # Answer a paused automation (the request id comes from its stream)\n  tabstack agent input req_abc123 --data '{\"fields\":[{\"ref\":\"email\",\"value\":\"ada@example.com\"}]}'\n\n  # Decline the request instead\n  tabstack agent input req_abc123 --data '{\"cancelled\":true}'",
+		Args:    exactArgsNamed("<request-id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dataSpec == "" {
-				return withCode(2, fmt.Errorf("--data is required (JSON object with fields or cancelled)"))
+				return withCode(2, fmt.Errorf("the --data flag is required: a JSON object with \"fields\", or {\"cancelled\":true}"))
 			}
-			raw, err := readJSON(dataSpec)
+			raw, err := readJSON(dataSpec, "--data")
 			if err != nil {
 				return withCode(2, err)
 			}
 
 			var req client.AutomateInputRequest
 			if err := json.Unmarshal(raw, &req); err != nil {
-				return withCode(2, fmt.Errorf("--data: %w", err))
+				return withCode(2, fmt.Errorf("invalid --data: %w", err))
 			}
 			if len(req.Fields) == 0 && !req.Cancelled {
 				return withCode(2, fmt.Errorf(
-					"--data must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
+					"the --data payload must set \"fields\" (to submit values) or \"cancelled\":true (to decline); "+
 						"got neither, unknown keys are ignored by the API",
 				))
 			}
 
-			if err := rootApp.client.AutomateInput(context.Background(), args[0], req); err != nil {
+			if err := rootApp.client.AutomateInput(cmd.Context(), args[0], req); err != nil {
 				return classifyError(err)
 			}
 
@@ -343,7 +371,7 @@ func newInputCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dataSpec, "data", "", "JSON input payload: {\"fields\":[{\"ref\":\"...\",\"value\":\"...\"}]} or {\"cancelled\":true} (required)")
+	cmd.Flags().StringVar(&dataSpec, "data", "", "input payload as JSON: {\"fields\":[{\"ref\":\"...\",\"value\":\"...\"}]} or {\"cancelled\":true} (required)")
 	return cmd
 }
 
@@ -354,4 +382,39 @@ func failureError(kind, msg string) error {
 		return fmt.Errorf("%s failed: %s", kind, msg)
 	}
 	return fmt.Errorf("%s reported failure", kind)
+}
+
+// maxDurationHelp is shared by automate and research. The overlap with
+// --timeout is the confusing part, so both flags say what the other does.
+const maxDurationHelp = "stop the whole stream after this long, e.g. 10m (unlike --timeout, which bounds non-streaming calls only)"
+
+// streamContext derives the context a streaming command runs under. With
+// --max-duration set it carries a deadline; without one it is the root context
+// unchanged, so a long task is bounded only by the signal handler.
+func streamContext(parent context.Context, maxDuration time.Duration) (context.Context, context.CancelFunc) {
+	if maxDuration <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, maxDuration)
+}
+
+// classifyStreamError maps how a stream ended onto an exit code.
+//
+// Cancellation and expiry both surface as context errors, so they are told
+// apart by which context ended: the signal handler cancels the parent, while
+// --max-duration expires only the derived one. Both exit 1, but only expiry is
+// a real failure worth explaining, so it names the flag and the elapsed time.
+func classifyStreamError(parent context.Context, err error, maxDuration, elapsed time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	if parent.Err() != nil {
+		return withCode(1, ErrInterrupted)
+	}
+	if maxDuration > 0 && errors.Is(err, context.DeadlineExceeded) {
+		return withCode(1, fmt.Errorf(
+			"stopped after %s: the --max-duration limit of %s was reached",
+			elapsed.Round(time.Second), maxDuration))
+	}
+	return classifyError(err)
 }

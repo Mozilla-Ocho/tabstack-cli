@@ -58,6 +58,7 @@ func newAuthLoginCmd() *cobra.Command {
 		Long: "Open the Tabstack console in your browser, sign in, and store the\n" +
 			"resulting session. The session is user scoped; API keys are organisation\n" +
 			"scoped and set up separately at the end of login.",
+		Example:     "  # Sign in and set up an API key for the organisation\n  tabstack auth login\n\n  # Sign in without creating a key (CI, or you already have one)\n  tabstack auth login --no-key\n\n  # Adopt an existing key rather than minting a new one\n  tabstack auth login --api-key-setup=existing",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mode, err := keySetupModeFrom(keySetup, noKey)
@@ -70,6 +71,8 @@ func newAuthLoginCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&keySetup, "api-key-setup", "",
 		"what to do about an API key after signing in: create|existing|skip")
+	_ = cmd.RegisterFlagCompletionFunc("api-key-setup", fixedCompletions("create", "existing", "skip"))
+	addOrgFlag(cmd)
 	cmd.Flags().BoolVar(&noKey, "no-key", false, "alias for --api-key-setup=skip")
 	return cmd
 }
@@ -125,6 +128,10 @@ func runLogin(ctx context.Context, mode keySetupMode, orgHint string) error {
 		// Shutdown (not Close) so an in-flight response finishes writing; Close
 		// can tear the connection down mid-write and the browser gets a reset
 		// instead of the page.
+		// Deliberately not derived from the command context: on the failure path
+		// the user may already have hit Ctrl-C, and this shutdown is what flushes
+		// the callback page to the browser. Inheriting the cancellation would
+		// reset the connection instead of showing the page.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)

@@ -20,8 +20,10 @@ func newAuthSwitchCmd() *cobra.Command {
 			"never signs you in again; it selects which stored API key product calls\n" +
 			"use. Pass an organisation id, name, or unique name prefix, or run with no\n" +
 			"argument to pick from a list.",
-		Args:        cobra.MaximumNArgs(1),
-		Annotations: map[string]string{"skipClient": "true"},
+		Example:           "  # Pick from a list\n  tabstack auth switch\n\n  # By id, exact name, or unique name prefix\n  tabstack auth switch org_01hxyz\n  tabstack auth switch acme",
+		Args:              maxArgsNamed(1, "[organisation]"),
+		ValidArgsFunction: completeOrgs,
+		Annotations:       map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
 			if len(args) == 1 {
@@ -148,6 +150,12 @@ func applySwitch(ctx context.Context, c *console.Client, target orgRef) error {
 	}
 
 	name := cfg.OrgName(target.ID)
+	if jsonMode(r) {
+		return emitJSON(r, switchJSON{
+			Action: "switch", OK: true,
+			Org: target.ID, OrgName: name, APIKeyStored: cfg.HasKey(target.ID),
+		})
+	}
 	if cfg.HasKey(target.ID) {
 		fmt.Fprintf(r.Out, "%s now acting as %s (%s), API key in place\n",
 			r.Styles.Success.Render("✓"), name, target.ID)
@@ -156,6 +164,17 @@ func applySwitch(ctx context.Context, c *console.Client, target orgRef) error {
 			r.Styles.Success.Render("✓"), name, target.ID)
 	}
 	return nil
+}
+
+// switchJSON is the machine-readable result of a switch. It carries the key
+// state because "which org am I" and "can I actually call the API" are the two
+// things a script asks after switching.
+type switchJSON struct {
+	Action       string `json:"action"`
+	OK           bool   `json:"ok"`
+	Org          string `json:"org"`
+	OrgName      string `json:"org_name,omitempty"`
+	APIKeyStored bool   `json:"api_key_stored"`
 }
 
 // isOfflineError reports whether err looks like "could not reach the console"

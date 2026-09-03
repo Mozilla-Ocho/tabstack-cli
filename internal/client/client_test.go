@@ -21,8 +21,71 @@ func TestNewTrimsTrailingSlash(t *testing.T) {
 
 func TestWithTimeout(t *testing.T) {
 	c := New("k", "https://x", WithTimeout(5*time.Second))
-	if c.http.Timeout != 5*time.Second {
-		t.Errorf("Timeout = %v", c.http.Timeout)
+	if c.timeout != 5*time.Second {
+		t.Errorf("timeout = %v, want 5s", c.timeout)
+	}
+	// The timeout must not land on the http.Client: that would cover reading
+	// the response body and so cut SSE streams off. See TestTimeoutSpares...
+	if c.http.Timeout != 0 {
+		t.Errorf("http.Client.Timeout = %v, want 0 (would cut streams)", c.http.Timeout)
+	}
+}
+
+// TestTimeoutAppliesToJSON checks the configured timeout actually bounds a
+// non-streaming call whose server is slower than the deadline.
+func TestTimeoutAppliesToJSON(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := New("k", srv.URL, WithTimeout(50*time.Millisecond))
+	var out map[string]any
+	err := c.doJSON(context.Background(), "/slow", nil, &out)
+	if err == nil {
+		t.Fatal("doJSON succeeded, want a timeout error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestTimeoutSparesStreams is the regression test for the bug this replaces:
+// WithTimeout used to set http.Client.Timeout, which bounds the whole exchange
+// including the body, so `--timeout 30s` silently killed every SSE stream at
+// 30s. A stream that dribbles events past the deadline must still complete.
+func TestTimeoutSparesStreams(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for range 3 {
+			_, _ = io.WriteString(w, "event: tick\ndata: {\"n\":1}\n\n")
+			flusher.Flush()
+			time.Sleep(30 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	// A timeout far shorter than the stream's total lifetime.
+	c := New("k", srv.URL, WithTimeout(20*time.Millisecond))
+	var events int
+	err := c.doStream(context.Background(), "/stream", nil, func(Event) error {
+		events++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("doStream returned %v, want the stream to outlive the timeout", err)
+	}
+	if events != 3 {
+		t.Errorf("got %d events, want 3", events)
 	}
 }
 
@@ -142,14 +205,147 @@ func TestAPIErrorPlainBody(t *testing.T) {
 	}
 }
 
-func TestAPIErrorMessageFormat(t *testing.T) {
-	withMsg := &APIError{StatusCode: 400, Message: "nope"}
-	if withMsg.Error() != "api error (400): nope" {
-		t.Errorf("Error() = %q", withMsg.Error())
+// TestAPIErrorMessage covers the rendered shape: the greppable core, the
+// status-specific guidance, and the trace id.
+//
+// Two properties matter beyond the wording. The literal "api error (NNN):"
+// substring must survive, because that is what anything parsing stderr today
+// matches on. And the message must not *start* with "api": fang title-cases the
+// first word of a rendered error, which is what turned it into "Api error" and
+// silently broke that same grep.
+func TestAPIErrorMessage(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         APIError
+		wantSubstrs []string
+		notSubstrs  []string
+	}{
+		{
+			name:        "message and status",
+			err:         APIError{StatusCode: 400, Message: "nope"},
+			wantSubstrs: []string{"api error (400): nope"},
+		},
+		{
+			name:        "no message",
+			err:         APIError{StatusCode: 503},
+			wantSubstrs: []string{"api error: status 503"},
+		},
+		{
+			name:        "401 points at re-authentication",
+			err:         APIError{StatusCode: 401, Message: "Unauthorized"},
+			wantSubstrs: []string{"api error (401): Unauthorized", "The key may be revoked or expired", "tabstack auth login", "tabstack auth status"},
+		},
+		{
+			name:        "403 points at org scoping",
+			err:         APIError{StatusCode: 403, Message: "Forbidden"},
+			wantSubstrs: []string{"api error (403): Forbidden", "different organisation", "--org"},
+			notSubstrs:  []string{"auth login"},
+		},
+		{
+			name:        "429 without Retry-After",
+			err:         APIError{StatusCode: 429, Message: "Too Many Requests"},
+			wantSubstrs: []string{"api error (429)", "Rate limited", "backoff"},
+		},
+		{
+			name:        "429 with numeric Retry-After gets a unit",
+			err:         APIError{StatusCode: 429, Message: "Too Many Requests", RetryAfter: "30"},
+			wantSubstrs: []string{"Rate limited", "retry after 30s"},
+		},
+		{
+			name:        "429 with an HTTP-date Retry-After is passed through",
+			err:         APIError{StatusCode: 429, RetryAfter: "Wed, 21 Oct 2026 07:28:00 GMT"},
+			wantSubstrs: []string{"retry after Wed, 21 Oct 2026 07:28:00 GMT"},
+		},
+		{
+			name:        "trace id present",
+			err:         APIError{StatusCode: 500, Message: "boom", TraceID: "abc-123"},
+			wantSubstrs: []string{"api error (500): boom", "(trace id abc-123)"},
+		},
+		{
+			name:        "trace id absent leaves no empty parens",
+			err:         APIError{StatusCode: 500, Message: "boom"},
+			wantSubstrs: []string{"api error (500): boom"},
+			notSubstrs:  []string{"trace id"},
+		},
+		{
+			name:        "a 404 gets no invented guidance",
+			err:         APIError{StatusCode: 404, Message: "Not Found"},
+			wantSubstrs: []string{"api error (404): Not Found"},
+			notSubstrs:  []string{"Rate limited", "organisation", "auth login"},
+		},
 	}
-	noMsg := &APIError{StatusCode: 503}
-	if noMsg.Error() != "api error: status 503" {
-		t.Errorf("Error() = %q", noMsg.Error())
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.err.Error()
+			for _, want := range tc.wantSubstrs {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in %q", want, got)
+				}
+			}
+			for _, no := range tc.notSubstrs {
+				if strings.Contains(got, no) {
+					t.Errorf("unexpected %q in %q", no, got)
+				}
+			}
+			if strings.HasPrefix(got, "api") {
+				t.Errorf("message starts with an acronym, fang will render it as \"Api\": %q", got)
+			}
+		})
+	}
+}
+
+// TestDecodeErrorCapturesHeaders checks the two headers are read off the
+// response rather than only being reachable under --debug.
+func TestDecodeErrorCapturesHeaders(t *testing.T) {
+	cases := []struct {
+		name           string
+		headers        map[string]string
+		wantTrace      string
+		wantRetryAfter string
+	}{
+		{
+			name:           "both present",
+			headers:        map[string]string{"X-Trace-Id": "trace-abc", "Retry-After": "12"},
+			wantTrace:      "trace-abc",
+			wantRetryAfter: "12",
+		},
+		{
+			name:      "trace only",
+			headers:   map[string]string{"X-Trace-Id": "trace-xyz"},
+			wantTrace: "trace-xyz",
+		},
+		{name: "neither"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for k, v := range tc.headers {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, `{"error":"slow down"}`)
+			}))
+			defer srv.Close()
+
+			c := New("k", srv.URL)
+			err := c.doJSON(context.Background(), "/x", nil, nil)
+
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("err = %v, want *APIError", err)
+			}
+			if apiErr.TraceID != tc.wantTrace {
+				t.Errorf("TraceID = %q, want %q", apiErr.TraceID, tc.wantTrace)
+			}
+			if apiErr.RetryAfter != tc.wantRetryAfter {
+				t.Errorf("RetryAfter = %q, want %q", apiErr.RetryAfter, tc.wantRetryAfter)
+			}
+			if apiErr.Message != "slow down" {
+				t.Errorf("Message = %q", apiErr.Message)
+			}
+		})
 	}
 }
 

@@ -42,6 +42,7 @@ func newSchemaCmd() *cobra.Command {
 		Long: "Work with the public tabstack-schemas library: list the available\n" +
 			"schemas, pull them into a local store, and check or remove pulled copies.\n" +
 			"Pulled schemas feed `tabstack extract json --schema-name`.",
+		Example: "  tabstack schema list\n  tabstack schema pull job-posting\n  tabstack extract json https://example.com/jobs/1 --schema-name job-posting",
 	}
 	cmd.AddCommand(
 		newSchemaListCmd(),
@@ -63,8 +64,9 @@ func newSchemaListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "list",
 		Short:       "List schemas in the library (or just the ones pulled locally)",
+		Example:     "  # Everything in the public library, grouped by category\n  tabstack schema list\n\n  # Only what you have pulled, without touching the network\n  tabstack schema list --local\n\n  # Ignore the cached index and refetch it\n  tabstack schema list --refresh",
 		Annotations: map[string]string{"skipClient": "true"},
-		Args:        cobra.NoArgs,
+		Args:        noArgsNamed(),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := schemaStoreDir(storage)
 			if err != nil {
@@ -80,7 +82,7 @@ func newSchemaListCmd() *cobra.Command {
 				return printLocalList(pulled)
 			}
 
-			idx, err := schemas.CachedIndex(context.Background(), schemas.NewFetcher(), dir, indexCacheTTL, refresh)
+			idx, err := schemas.CachedIndex(cmd.Context(), schemas.NewFetcher(), dir, indexCacheTTL, refresh)
 			if err != nil {
 				return classifyError(err)
 			}
@@ -106,6 +108,7 @@ func newSchemaPullCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "pull [selector...]",
 		Short:       "Pull schemas from the library into a local store",
+		Example:     "  # By bare name, by category, or by full repo path\n  tabstack schema pull job-posting\n  tabstack schema pull jobs\n  tabstack schema pull jobs/job-posting.json\n\n  # Everything, overwriting local edits without asking\n  tabstack schema pull --all --force\n\n  # Keep a project-local store instead of the default\n  tabstack schema pull job-posting --storage ./schemas",
 		Annotations: map[string]string{"skipClient": "true"},
 		Long: "Pull one or more schemas into a local store (default\n" +
 			"$XDG_CONFIG_HOME/tabstack/schemas, or ~/.config/tabstack/schemas).\n\n" +
@@ -115,6 +118,8 @@ func newSchemaPullCmd() *cobra.Command {
 			"are prompted to overwrite, keep your local copy, or quit. Use --force to\n" +
 			"overwrite without prompting. Customise a pulled schema, then re-pull only\n" +
 			"when you want the latest upstream version.",
+		// The one cobra validator left in the tree, and safe: ArbitraryArgs
+		// never returns an error, so it cannot produce a miscoded exit.
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completePullSelectors,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -130,7 +135,7 @@ func newSchemaPullCmd() *cobra.Command {
 				return withCode(1, err)
 			}
 
-			ctx := context.Background()
+			ctx := cmd.Context()
 			fetcher := schemas.NewFetcher()
 
 			idx, err := schemas.CachedIndex(ctx, fetcher, dir, indexCacheTTL, refresh)
@@ -164,8 +169,9 @@ func newSchemaStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Short:       "Show which pulled schemas are modified or out of date",
+		Example:     "  # What have I changed, and what has moved upstream?\n  tabstack schema status\n\n  # Skip the network; only report local edits\n  tabstack schema status --local",
 		Annotations: map[string]string{"skipClient": "true"},
-		Args:        cobra.NoArgs,
+		Args:        noArgsNamed(),
 		Long: "Report the state of each pulled schema by comparing it against the\n" +
 			"content recorded when it was pulled. Local edits show as 'modified';\n" +
 			"upstream changes show as 'outdated'. Use --local to skip the network and\n" +
@@ -175,7 +181,7 @@ func newSchemaStatusCmd() *cobra.Command {
 			if err != nil {
 				return withCode(1, err)
 			}
-			return runStatus(context.Background(), dir, local)
+			return runStatus(cmd.Context(), dir, local)
 		},
 	}
 
@@ -191,8 +197,9 @@ func newSchemaPathCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "path <name>",
 		Short:             "Print the local file path of a pulled schema",
+		Example:           "  # Print a stored schema's path, handy for other tools\n  tabstack schema path job-posting\n  cat \"$(tabstack schema path job-posting)\"",
 		Annotations:       map[string]string{"skipClient": "true"},
-		Args:              cobra.ExactArgs(1),
+		Args:              exactArgsNamed("<name>"),
 		ValidArgsFunction: completeLocalSchemaNames,
 		Long: "Resolve a pulled schema to its local file path, for scripting:\n" +
 			"  tabstack extract json <url> --schema @\"$(tabstack schema path job-posting)\"",
@@ -220,8 +227,9 @@ func newSchemaRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "rm <selector...>",
 		Short:             "Remove pulled schemas from the local store",
+		Example:           "  tabstack schema rm job-posting\n  tabstack schema rm jobs/job-posting.json finance/crypto-asset.json",
 		Annotations:       map[string]string{"skipClient": "true"},
-		Args:              cobra.MinimumNArgs(1),
+		Args:              minArgsNamed(1, "<selector>"),
 		ValidArgsFunction: completeLocalSchemaNames,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			dir, err := schemaStoreDir(storage)
@@ -244,7 +252,7 @@ func newSchemaRmCmd() *cobra.Command {
 			}()
 
 			r := rootApp.renderer
-			removed := 0
+			removed := []string{}
 			for _, sel := range args {
 				rel, err := schemas.FindLocal(dir, sel)
 				if err != nil {
@@ -254,11 +262,15 @@ func newSchemaRmCmd() *cobra.Command {
 					return withCode(1, err)
 				}
 				m.Remove(rel)
-				removed++
-				fmt.Fprintf(r.Out, "%s removed %s\n", r.Styles.Success.Render("✓"), rel)
+				removed = append(removed, rel)
+				// Progress to stderr, matching pull; the tally below is the result.
+				fmt.Fprintf(r.Err, "%s removed %s\n", r.Styles.Success.Render("✓"), rel)
 			}
 
-			fmt.Fprintf(r.Out, "\n%d removed\n", removed)
+			if jsonMode(r) {
+				return emitJSON(r, rmResult{Removed: removed})
+			}
+			fmt.Fprintf(r.Out, "\n%d removed\n", len(removed))
 			return nil
 		},
 	}
@@ -311,7 +323,10 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 
 	stamp := time.Now().UTC().Format(time.RFC3339)
 
-	var pulled, current, kept int
+	// Per-schema progress goes to stderr in both modes: it is progress, not a
+	// result, and leaving it on stdout meant `schema pull | ...` carried tick
+	// marks. The summary below is the result and stays on stdout.
+	var res pullResult
 	record := func(p string, data []byte) { m.Set(p, schemas.CanonicalSHA(data), stamp) }
 
 	for _, e := range targets {
@@ -331,21 +346,21 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 				return withCode(1, err)
 			}
 			record(e.Path, remote)
-			pulled++
-			fmt.Fprintf(r.Out, "%s pulled %s\n", r.Styles.Success.Render("✓"), e.Path)
+			res.Pulled = append(res.Pulled, e.Path)
+			fmt.Fprintf(r.Err, "%s pulled %s\n", r.Styles.Success.Render("✓"), e.Path)
 
 		case schemas.Equal(local, remote):
 			record(e.Path, remote) // backfill manifest for pre-existing files
-			current++
-			fmt.Fprintf(r.Out, "%s up to date %s\n", r.Styles.Muted.Render("="), e.Path)
+			res.UpToDate = append(res.UpToDate, e.Path)
+			fmt.Fprintf(r.Err, "%s up to date %s\n", r.Styles.Muted.Render("="), e.Path)
 
 		case force:
 			if err := schemas.Write(dir, e.Path, remote); err != nil {
 				return withCode(1, err)
 			}
 			record(e.Path, remote)
-			pulled++
-			fmt.Fprintf(r.Out, "%s updated %s\n", r.Styles.Success.Render("✓"), e.Path)
+			res.Pulled = append(res.Pulled, e.Path)
+			fmt.Fprintf(r.Err, "%s updated %s\n", r.Styles.Success.Render("✓"), e.Path)
 
 		default:
 			action, err := promptChoice(
@@ -363,21 +378,32 @@ func runPull(ctx context.Context, fetcher *schemas.Fetcher, dir string, targets 
 					return withCode(1, err)
 				}
 				record(e.Path, remote)
-				pulled++
-				fmt.Fprintf(r.Out, "%s updated %s\n", r.Styles.Success.Render("✓"), e.Path)
+				res.Pulled = append(res.Pulled, e.Path)
+				fmt.Fprintf(r.Err, "%s updated %s\n", r.Styles.Success.Render("✓"), e.Path)
 			case 'q':
-				fmt.Fprintln(r.Out, "Quit. No further schemas pulled.")
-				printPullSummary(pulled, current, kept)
-				return nil
+				fmt.Fprintln(r.Err, "Quit. No further schemas pulled.")
+				return printPullSummary(res)
 			default: // keep
-				kept++
-				fmt.Fprintf(r.Out, "%s kept %s\n", r.Styles.Muted.Render("·"), e.Path)
+				res.Kept = append(res.Kept, e.Path)
+				fmt.Fprintf(r.Err, "%s kept %s\n", r.Styles.Muted.Render("·"), e.Path)
 			}
 		}
 	}
 
-	printPullSummary(pulled, current, kept)
-	return nil
+	return printPullSummary(res)
+}
+
+// rmResult is what `schema rm` deleted.
+type rmResult struct {
+	Removed []string `json:"removed"`
+}
+
+// localEntryJSON is one row of `schema list --local`. It deliberately shares
+// the "path" key with the library listing's entries so both are queryable the
+// same way; the descriptive fields only exist in the online index.
+type localEntryJSON struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
 }
 
 // statusRow is one schema's reconciled state for `schema status`.
@@ -546,9 +572,34 @@ func statusLabel(modified, outdated, remoteUnknown bool) string {
 	}
 }
 
-// printPullSummary writes a one-line tally to stdout.
-func printPullSummary(pulled, current, kept int) {
-	fmt.Fprintf(rootApp.renderer.Out, "\n%d pulled, %d up to date, %d kept\n", pulled, current, kept)
+// pullResult is what `schema pull` did, as paths rather than counts so JSON
+// consumers can act on the specific schemas rather than re-deriving them.
+type pullResult struct {
+	Pulled   []string `json:"pulled"`
+	UpToDate []string `json:"up_to_date"`
+	Kept     []string `json:"kept"`
+}
+
+// printPullSummary writes the result: a tally in pretty mode, the object in
+// JSON mode. Either way it is the only thing on stdout, because the per-schema
+// progress went to stderr.
+func printPullSummary(res pullResult) error {
+	r := rootApp.renderer
+	if jsonMode(r) {
+		// Normalise nil to [] so consumers can index without a null check.
+		if res.Pulled == nil {
+			res.Pulled = []string{}
+		}
+		if res.UpToDate == nil {
+			res.UpToDate = []string{}
+		}
+		if res.Kept == nil {
+			res.Kept = []string{}
+		}
+		return emitJSON(r, res)
+	}
+	fmt.Fprintf(r.Out, "\n%d pulled, %d up to date, %d kept\n", len(res.Pulled), len(res.UpToDate), len(res.Kept))
+	return nil
 }
 
 // printStatus renders status rows. JSON mode emits the rows for piping; pretty
@@ -587,7 +638,14 @@ func printStatus(rows []statusRow) error {
 func printLocalList(pulled []string) error {
 	r := rootApp.renderer
 	if r.Mode == ui.ModeJSON {
-		raw, err := json.Marshal(pulled)
+		// Objects with a "path" key, matching `schema list`, so `jq '.[].path'`
+		// works against either. Title and description are absent because
+		// --local is offline and only the index carries them.
+		out := make([]localEntryJSON, 0, len(pulled))
+		for _, rel := range pulled {
+			out = append(out, localEntryJSON{Path: rel, Name: baseName(rel)})
+		}
+		raw, err := json.Marshal(out)
 		if err != nil {
 			return err
 		}

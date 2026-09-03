@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image/color"
+	"io"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
 
 	// fang renders with lipgloss v2; the v1 module (charmbracelet/lipgloss) is
 	// used separately by internal/ui for command output.
@@ -65,41 +68,50 @@ type coded interface {
 	Code() int
 }
 
+// errorHandler renders command failures. Cancellation is special-cased: the
+// user pressed Ctrl-C, so a red ERROR box announcing what they just asked for
+// is theatre. Everything else goes through fang's default rendering.
+func errorHandler(w io.Writer, styles fang.Styles, err error) {
+	if errors.Is(err, cmd.ErrInterrupted) {
+		_, _ = fmt.Fprintln(w, "cancelled")
+		return
+	}
+	fang.DefaultErrorHandler(w, styles, err)
+
+	// Only for failures we cannot explain. A footer on every dropped
+	// connection would train people to skip it.
+	if cmd.IsLikelyBug(err) {
+		_, _ = fmt.Fprint(w, cmd.BugReportHint())
+	}
+}
+
 func main() {
 	root := cmd.NewRootCmd()
+
+	// One signal handler for the whole tree. Every command threads this
+	// context down to its request, so Ctrl-C cancels the call in flight and
+	// the server is told, rather than the process being killed mid-request.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// fang runs the command tree with styled help, errors, and version output.
 	// It prints any error itself (styled, to stderr) and returns it, so we keep
 	// owning the exit-code mapping that makes this CLI scriptable.
 	if err := fang.Execute(
-		context.Background(),
+		ctx,
 		root,
 		fang.WithVersion(cmd.Version()),
 		fang.WithColorSchemeFunc(brandScheme),
+		fang.WithErrorHandler(errorHandler),
 	); err != nil {
+		// Every usage error now carries its code on the error itself: the
+		// positional validators in cmd/helpers.go, the grouping commands'
+		// unknown-subcommand check, and the root FlagErrorFunc all return
+		// withCode(2, ...). Anything reaching the fallback is a genuine
+		// runtime failure.
 		if c, ok := errors.AsType[coded](err); ok {
 			os.Exit(c.Code())
 		}
-		if isCobraUsageError(err) {
-			os.Exit(2)
-		}
 		os.Exit(1)
 	}
-}
-
-// isCobraUsageError detects errors that Cobra emits for wrong argument counts,
-// unknown commands, and unknown flags, all user mistakes that should exit 2.
-//
-// This relies on Cobra's error message prefixes (stable across v1.x, tested
-// against v1.10.2). A more robust fix would replace cobra.ExactArgs with
-// custom Args validators that return withCode(2,...) directly, eliminating
-// the need for string matching here. TODO: migrate when convenient.
-func isCobraUsageError(err error) bool {
-	msg := err.Error()
-	return strings.HasPrefix(msg, "accepts ") ||
-		strings.HasPrefix(msg, "unknown command") ||
-		strings.HasPrefix(msg, "unknown flag") ||
-		strings.HasPrefix(msg, "unknown shorthand flag") ||
-		strings.HasPrefix(msg, "required flag") ||
-		strings.HasPrefix(msg, "invalid argument") // pflag typed-value parse errors
 }

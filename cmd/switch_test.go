@@ -74,7 +74,7 @@ func TestSwitchWithNoArgumentNeedsATerminal(t *testing.T) {
 
 func TestSwitchResolvesArgumentAndSaves(t *testing.T) {
 	isolate(t)
-	buf := setTestApp(t)
+	buf := setTestAppPretty(t)
 	cfg := sessionOnly(t)
 	cfg.UpsertOrg("org_b", "Bravo").APIKey = "key-bravo-1234"
 	flagAuthURL = orgServer(t, `[{"id":"org_a","name":"Alpha","role":"owner"},{"id":"org_b","name":"Bravo","role":"member"}]`).URL

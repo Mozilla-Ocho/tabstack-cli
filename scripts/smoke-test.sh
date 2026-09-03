@@ -79,6 +79,32 @@ run_expect_fail() {
   fi
 }
 
+# run_json_has NAME SUBSTRING -- CMD ARGS...
+# Runs the command with --output json and passes when SUBSTRING appears in
+# stdout. Guards the contract that every command emits JSON, and that stdout
+# carries only the object (progress goes to stderr, which is discarded here).
+run_json_has() {
+  local name="$1" want="$2"; shift 2
+  [ "$1" = "--" ] && shift
+
+  printf '%s▶ %s%s\n' "$c_blue" "$name" "$c_off"
+  printf '%s  $ %s %s --output json | grep %s%s\n' "$c_dim" "$BIN" "$*" "$want" "$c_off"
+
+  local out
+  out="$("$BIN" "$@" --output json 2>/dev/null)"
+  case "$out" in
+    *"$want"*)
+      printf '%s  ✅ PASS%s\n\n' "$c_green" "$c_off"
+      PASS=$((PASS + 1))
+      ;;
+    *)
+      printf '%s  ❌ FAIL (no %s in: %s)%s\n\n' "$c_red" "$want" "$out" "$c_off"
+      FAIL=$((FAIL + 1))
+      FAILED+=("$name")
+      ;;
+  esac
+}
+
 # --- preflight ---------------------------------------------------------------
 
 if [ ! -x "$BIN" ]; then
@@ -87,10 +113,19 @@ if [ ! -x "$BIN" ]; then
 fi
 
 # Confirm a key resolves before spending time/credits.
-if ! "$BIN" auth status --no-color 2>&1 | grep -q "API key configured"; then
-  printf '%sNo API key configured.%s Set TABSTACK_API_KEY, pass --api-key, or run `tabstack auth login`.\n' "$c_red" "$c_off"
-  exit 1
-fi
+#
+# This used to grep pretty output for "API key configured", a string the CLI has
+# never printed, so the preflight failed unconditionally and the whole script
+# was unrunnable. Read the machine-readable status instead, which exists for
+# exactly this, and match on substrings so jq is not a dependency.
+status_json="$("$BIN" auth status --output json 2>/dev/null || true)"
+case "$status_json" in
+  *'"api_key_stored":true'* | *'"env_override":true'*) ;;
+  *)
+    printf '%sNo API key configured.%s Set TABSTACK_API_KEY, pass --api-key, or run `tabstack auth login`.\n' "$c_red" "$c_off"
+    exit 1
+    ;;
+esac
 
 # Fixtures.
 cat > "$TMP/schema.json" <<'JSON'
@@ -133,6 +168,49 @@ run_expect_fail "generate json empty --instructions" 2 -- generate json "$URL" -
 # Malformed JSON caught locally before any API call (exit 2).
 run_expect_fail "extract json invalid JSON schema" 2 -- extract json "$URL" --schema 'not json'
 run_expect_fail "agent input missing --data" 2 -- agent input some-request-id
+
+# --- schema store (GitHub only, no API spend) --------------------------------
+#
+# Pulls into a throwaway store under $TMP so the run is self-contained and does
+# not touch the user's real schema directory.
+
+SCHEMA_STORE="$TMP/schemas"
+
+run "schema list (library)"        -- schema list
+run "schema pull"                  -- schema pull job-posting --storage "$SCHEMA_STORE"
+run "schema pull (idempotent)"     -- schema pull job-posting --storage "$SCHEMA_STORE"
+run "schema status (local)"        -- schema status --local --storage "$SCHEMA_STORE"
+run "schema path"                  -- schema path job-posting --storage "$SCHEMA_STORE"
+run "extract json (--schema-name)" -- extract json "$URL" \
+  --schema-name job-posting --storage "$SCHEMA_STORE"
+
+run_expect_fail "schema pull unknown selector" 2 -- schema pull no-such-schema --storage "$SCHEMA_STORE"
+run_expect_fail "schema pull no selector" 2 -- schema pull --storage "$SCHEMA_STORE"
+run_expect_fail "extract json unknown --schema-name" 2 -- extract json "$URL" \
+  --schema-name no-such-schema --storage "$SCHEMA_STORE"
+run_expect_fail "both schema flags" 2 -- extract json "$URL" --schema '{}' --schema-name job-posting
+
+# --- json output contract (offline, no API spend) ----------------------------
+#
+# auth, keys, config, and schema ignored --output entirely until recently, so
+# these guard that they still honour it and keep their shapes.
+
+run_json_has "auth status emits json"        '"signed_in"'   -- auth status
+run_json_has "config show emits json"        '"orgs"'        -- config show
+run_json_has "config path emits json"        '"path"'        -- config path
+run_json_has "schema list --local emits objects" '"path"'    -- schema list --local --storage "$SCHEMA_STORE"
+run_json_has "schema status emits json"      '"state"'      -- schema status --local --storage "$SCHEMA_STORE"
+run_json_has "schema pull emits a summary"   '"up_to_date"' -- schema pull job-posting --storage "$SCHEMA_STORE"
+run_json_has "schema rm emits a summary"     '"removed"'    -- schema rm job-posting --storage "$SCHEMA_STORE"
+
+# config show must never print a secret in full, in any mode.
+if "$BIN" config show --output json 2>/dev/null | grep -qE '"(api_key|access_token|refresh_token)":'; then
+  printf '%s  ❌ FAIL config show --output json exposed a raw credential field%s\n\n' "$c_red" "$c_off"
+  FAIL=$((FAIL + 1)); FAILED+=("config show redaction")
+else
+  printf '%s  ✅ PASS config show redaction%s\n\n' "$c_green" "$c_off"
+  PASS=$((PASS + 1))
+fi
 
 # --- agent (slow / costly) ---------------------------------------------------
 

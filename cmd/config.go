@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -21,6 +23,7 @@ func newConfigCmd() *cobra.Command {
 			"printing a secret in full. Migration to the current config shape happens\n" +
 			"automatically on the next save; these commands are for looking at the\n" +
 			"result and clearing out what is no longer used.",
+		Example: "  tabstack config show\n  tabstack config path",
 	}
 	cmd.AddCommand(newConfigPathCmd(), newConfigShowCmd(), newConfigDropLegacyKeyCmd())
 	return cmd
@@ -30,10 +33,15 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:         "path",
 		Short:       "Print the path of the config file",
+		Example:     "  # Print the config file path (bare, for scripting)\n  tabstack config path\n  cat \"$(tabstack config path)\"",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			r := rootApp.renderer
+			if jsonMode(r) {
+				return emitJSON(r, pathJSON{Path: rootApp.store.Path()})
+			}
 			// Bare and unstyled: this exists to be substituted into other commands.
-			fmt.Fprintln(rootApp.renderer.Out, rootApp.store.Path())
+			fmt.Fprintln(r.Out, rootApp.store.Path())
 			return nil
 		},
 	}
@@ -46,9 +54,14 @@ func newConfigShowCmd() *cobra.Command {
 		Long: "Print every organisation the CLI knows about and the state of its API key,\n" +
 			"not just the active one. Keys and tokens are redacted to their first and\n" +
 			"last four characters, so the output is safe to paste into a bug report.",
+		Example:     "  # Everything the CLI has stored, with secrets redacted\n  tabstack config show\n\n  # Machine-readable, still redacted\n  tabstack config show --output json | jq .orgs",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			showConfig(rootApp.renderer, rootApp.cfg, rootApp.store.Path())
+			r := rootApp.renderer
+			if jsonMode(r) {
+				return emitJSON(r, configJSON(rootApp.cfg, rootApp.store.Path()))
+			}
+			showConfig(r, rootApp.cfg, rootApp.store.Path())
 			return nil
 		},
 	}
@@ -58,16 +71,34 @@ func newConfigShowCmd() *cobra.Command {
 // else decides otherwise: there is no flag to print them in full.
 func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	k := r.Styles.Key
-	mode, permsOK := config.PermissionsOK(path)
+	mode, exists, permsOK := config.PermissionsState(path)
 
 	fmt.Fprintf(r.Out, "%s %s\n", k.Render("config:"), path)
-	if permsOK {
+	switch {
+	case !exists:
+		// Nothing written yet, so there are no bits to report. Printing the
+		// zero value here read as "permissions: 0", which looks like a fault.
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("permissions:"),
+			r.Styles.Muted.Render("not created yet; written 0600 on first save"))
+	case permsOK:
 		fmt.Fprintf(r.Out, "%s %#o\n", k.Render("permissions:"), mode)
-	} else {
+	default:
 		fmt.Fprintf(r.Out, "%s %#o %s\n", k.Render("permissions:"), mode,
 			r.Styles.ErrorTag.Render(fmt.Sprintf("should be 0600: chmod 600 %s", path)))
 	}
 	fmt.Fprintf(r.Out, "%s %d\n", k.Render("version:"), cfg.Version)
+
+	// Where a setting came from is the question this command exists to answer,
+	// so a project file has to be visible or "why is concurrency 8?" has no
+	// answer anywhere.
+	if pc := rootApp.project; pc != nil {
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("project:"), pc.Path)
+		for _, line := range projectSettingLines(pc) {
+			fmt.Fprintf(r.Out, "    %s\n", r.Styles.Muted.Render(line))
+		}
+	} else {
+		fmt.Fprintf(r.Out, "%s %s\n", k.Render("project:"), r.Styles.Muted.Render("none found"))
+	}
 
 	// Session.
 	if cfg.Session == nil || cfg.Session.AccessToken == "" {
@@ -141,6 +172,141 @@ func showConfig(r uiRenderer, cfg *config.Config, path string) {
 	}
 }
 
+// projectSettingLines renders what a project file actually contributes.
+func projectSettingLines(pc *config.ProjectConfig) []string {
+	var out []string
+	add := func(name, value string) {
+		if value != "" {
+			out = append(out, name+" = "+value)
+		}
+	}
+	add("active_org", pc.ActiveOrg)
+	add("storage", pc.Storage)
+	add("output", pc.Output)
+	add("effort", pc.Effort)
+	add("geo", pc.Geo)
+	add("timeout", pc.Timeout)
+	add("max_duration", pc.MaxDuration)
+	if pc.Concurrency != nil {
+		add("concurrency", strconv.Itoa(*pc.Concurrency))
+	}
+	if pc.Retries != nil {
+		add("retries", strconv.Itoa(*pc.Retries))
+	}
+	if len(out) == 0 {
+		out = append(out, "(no settings)")
+	}
+	return out
+}
+
+// projectJSON is the machine-readable form of the project layer.
+type projectJSON struct {
+	Path     string            `json:"path"`
+	Settings map[string]string `json:"settings"`
+}
+
+// pathJSON is the object form of `config path`. Pretty mode stays a bare line
+// so it can be substituted into other commands; JSON mode gets a real object
+// so it composes with jq like everything else.
+type pathJSON struct {
+	Path string `json:"path"`
+}
+
+// configShowJSON mirrors what `config show` prints: every org, not just the
+// active one, with every secret redacted. There is no mode that prints a
+// credential in full, and that holds here too.
+type configShowJSON struct {
+	Path        string          `json:"path"`
+	Permissions string          `json:"permissions,omitempty"`
+	Exists      bool            `json:"exists"`
+	PermsOK     bool            `json:"permissions_ok"`
+	Version     int             `json:"version"`
+	Session     *sessionJSON    `json:"session,omitempty"`
+	BaseURL     string          `json:"base_url"`
+	AuthURL     string          `json:"auth_url"`
+	ActiveOrg   string          `json:"active_org,omitempty"`
+	Orgs        []configOrgJSON `json:"orgs"`
+	Project     *projectJSON    `json:"project,omitempty"`
+	LegacyKey   string          `json:"legacy_key_preview,omitempty"`
+	LegacyInUse bool            `json:"legacy_key_in_use"`
+	EnvOverride bool            `json:"env_override"`
+}
+
+type sessionJSON struct {
+	Email     string  `json:"email,omitempty"`
+	Preview   string  `json:"access_token_preview"`
+	ExpiresAt *string `json:"expires_at,omitempty"`
+	Expired   bool    `json:"expired"`
+	Scope     string  `json:"scope,omitempty"`
+}
+
+type configOrgJSON struct {
+	ID         string `json:"id"`
+	Name       string `json:"name,omitempty"`
+	Active     bool   `json:"active"`
+	KeyStored  bool   `json:"api_key_stored"`
+	KeyPreview string `json:"api_key_preview,omitempty"`
+	KeyName    string `json:"api_key_name,omitempty"`
+	KeyID      string `json:"api_key_id,omitempty"`
+}
+
+// configJSON builds configShowJSON. It mirrors showConfig's branches; keep the
+// two in step.
+func configJSON(cfg *config.Config, path string) configShowJSON {
+	mode, exists, permsOK := config.PermissionsState(path)
+	out := configShowJSON{
+		Path:        path,
+		Exists:      exists,
+		PermsOK:     permsOK,
+		Version:     cfg.Version,
+		BaseURL:     cfg.ResolveBaseURL(flagBaseURL),
+		AuthURL:     cfg.ResolveAuthURL(flagAuthURL),
+		ActiveOrg:   cfg.ActiveOrg,
+		Orgs:        []configOrgJSON{},
+		EnvOverride: os.Getenv(config.EnvAPIKey) != "",
+	}
+	if exists {
+		out.Permissions = fmt.Sprintf("%#o", mode)
+	}
+	if cfg.Session != nil && cfg.Session.AccessToken != "" {
+		sj := &sessionJSON{
+			Email:   cfg.Session.UserEmail,
+			Preview: config.Redact(cfg.Session.AccessToken),
+			Scope:   cfg.Session.Scope,
+		}
+		if !cfg.Session.ExpiresAt.IsZero() {
+			at := cfg.Session.ExpiresAt.UTC().Format(time.RFC3339)
+			sj.ExpiresAt = &at
+			sj.Expired = time.Until(cfg.Session.ExpiresAt) <= 0
+		}
+		out.Session = sj
+	}
+	for _, o := range orgRefsFromConfig(cfg) {
+		row := configOrgJSON{ID: o.ID, Name: o.Name, Active: o.ID == cfg.ActiveOrg}
+		if org := cfg.Org(o.ID); org != nil && org.APIKey != "" {
+			row.KeyStored = true
+			row.KeyPreview = config.Redact(org.APIKey)
+			row.KeyName = org.APIKeyName
+			row.KeyID = org.APIKeyID
+		}
+		out.Orgs = append(out.Orgs, row)
+	}
+	if pc := rootApp.project; pc != nil {
+		settings := map[string]string{}
+		for _, line := range projectSettingLines(pc) {
+			if name, value, ok := strings.Cut(line, " = "); ok {
+				settings[name] = value
+			}
+		}
+		out.Project = &projectJSON{Path: pc.Path, Settings: settings}
+	}
+	if cfg.LegacyAPIKey != "" {
+		out.LegacyKey = config.Redact(cfg.LegacyAPIKey)
+		out.LegacyInUse = cfg.ActiveOrg == ""
+	}
+	return out
+}
+
 // orgKeyLine describes one org's stored key without revealing it.
 func orgKeyLine(org *config.OrgCreds) string {
 	if org == nil || org.APIKey == "" {
@@ -166,12 +332,16 @@ func newConfigDropLegacyKeyCmd() *cobra.Command {
 			"config. It is only used while no organisation is active, so this refuses\n" +
 			"to run until the active organisation has a key of its own, which stops it\n" +
 			"leaving you with no working credential.",
+		Example:     "  # Remove the pre-organisation key once your org has its own\n  tabstack config drop-legacy-key\n\n  # Remove it regardless (you may be left with no credential)\n  tabstack config drop-legacy-key --force",
 		Annotations: map[string]string{"skipClient": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r := rootApp.renderer
 			cfg := rootApp.cfg
 
 			if cfg.LegacyAPIKey == "" {
+				if jsonMode(r) {
+					return emitJSON(r, actionJSON{Action: "drop_legacy_key", OK: true, Note: "no legacy API key stored"})
+				}
 				fmt.Fprintln(r.Out, "no legacy API key stored, nothing to do")
 				return nil
 			}
@@ -187,6 +357,9 @@ func newConfigDropLegacyKeyCmd() *cobra.Command {
 				return withCode(1, fmt.Errorf("save config: %w", err))
 			}
 
+			if jsonMode(r) {
+				return emitJSON(r, actionJSON{Action: "drop_legacy_key", OK: true, Org: cfg.ActiveOrg})
+			}
 			fmt.Fprintf(r.Out, "%s legacy API key removed from %s\n",
 				r.Styles.Success.Render("✓"), rootApp.store.Path())
 			if cfg.ActiveOrg != "" {

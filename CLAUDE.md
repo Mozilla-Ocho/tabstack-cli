@@ -35,6 +35,8 @@ Three layers, each in its own package:
 
 ### Shared app context
 
+Only `--output` and `--no-color` are root persistent flags, because only they apply to every command. The credential and endpoint flags are registered per subtree by `addProductFlags`/`addBaseURLFlag`/`addAuthHostFlag`/`addOrgFlag`/`addDebugFlag` (`cmd/root.go`), so help for `schema list` or `config show` no longer advertises `--api-key` and `--timeout`, which those commands never read. The split follows actual use: product-host commands (`agent`, `extract`, `generate`) take the credential, base URL, timeout, org, and debug flags; `mcp` takes those minus `--org` (`resolveMCPKey` does not honour an override) plus `--auth-url`; `auth` and `keys` take `--auth-url`, with `--org` on `keys` and on `auth login` only; `config` takes both URL flags because `config show` displays them; `schema` takes none. Passing a flag to a command that does not read it is now an "unknown flag" error rather than a silent no-op. `TestFlagPlacement` pins the whole matrix. `--debug` is a deliberate exception and stays on the root: cobra decides whether a flag consumes the next argument while still scanning for the subcommand, using only the flags it knows there, so a **boolean** registered per subtree makes `tabstack --debug extract markdown URL` swallow `extract` and fail with "Unknown command markdown". Valued flags survive that position by luck. `TestGlobalBooleanFlagsParseBeforeSubcommand` guards it.
+
 `cmd/root.go` defines `app{store, cfg, key, client, renderer, orgOverride}` and stores it in the package-global `rootApp`. The root command's `PersistentPreRunE` populates it **once** before any subcommand runs, so leaf commands never re-resolve config or rebuild the client. Commands tagged with the `skipClient` annotation (all of `auth`, `keys`, and `schema`) get a config-and-renderer setup with no product client, so they work before an API key exists. `consoleClient()`/`requireSession()` build the auth-host client with the session attached.
 
 ### Credentials, orgs, and resolution priority
@@ -50,6 +52,18 @@ All reads and writes go through `config.CredentialStore` (`Load`/`Save`/`Path`) 
 `Config.ResolveAPIKey` is the single product-credential resolver every command shares: **`--api-key`/`--key`** → **`TABSTACK_API_KEY`** → **stored key for the `--org` override** → **stored key for `ActiveOrg`** → **`LegacyAPIKey` (only with no active org)** → error. A `--org` override with no stored key is an error naming the exact `keys create` command, never a fallback to another org's key. `KeySource`/`EnvOverriding` are tracked so `auth status` can explain the resolution without printing the key. URLs resolve separately (`ResolveBaseURL`, `ResolveAuthURL`): file → env → flag.
 
 `--org` is a one-shot override: it resolves against the **local** config only (product commands never make a management call to pick a key), never mutates `ActiveOrg`, and prints the acting org to stderr so it lands in logs rather than piped stdout.
+
+### Project configuration
+
+`internal/config/project.go` holds the layer; `cmd/project.go` applies it. `.tabstack.toml` is found by walking **up** from the working directory, stopping at a `.git` directory, `$HOME`, or the filesystem root, so it works from a subdirectory of a monorepo without a stray file in a shared parent leaking into unrelated runs.
+
+`ProjectConfig` is a **strict allowlist and that is the entire design**. A project file arrives by `git clone`, so anything it can set is something a repository author can set on your machine. Credentials (`api_key`, `legacy_api_key`, `session`, `orgs`) are rejected because a project file is the file people commit. **Endpoints (`base_url`, `auth_url`) are rejected because they decide where the API key is sent**: honouring them from a cloned repository would make `git clone && tabstack extract` a credential-exfiltration primitive. They remain flag- and env-only, for development. `active_org` is allowed: it is a selector for one of *your* organisations, not a secret. A denied or unknown key is exit 2 naming it, never a silent omission, because silence leaves the author believing it took effect.
+
+`applyProjectConfig` pushes settings through **pflag** rather than the bound variables, so a bad value fails with the flag's own parser message. The `Changed()` check is the crux: flags carry meaningful defaults (`--timeout 2m`, `--retries 2`, `--concurrency 4`), so without it the default would always beat the file and project config would silently never apply. Settings for flags a command does not have are skipped, so a project pinning `--concurrency` does not break `auth status`.
+
+Ordering matters in `setupBase`: project config is applied **before** `newRenderer()`, because it can set `--output`. `active_org` is fed through the existing `orgOverride` path rather than mutating `cfg.ActiveOrg`, which would otherwise be written back to the user's own config on the next `Save`.
+
+Messages here lead with a literal word (`project config /path/... sets ...`) rather than the path, because fang title-cases the first word and turned `/tmp/proj/...` into `/Tmp/Proj/...`. That is the blind spot documented in `scripts/lint-copy.sh`: a format string starting with `%s` hides the substitution from the rule.
 
 ### OAuth login and org switching
 
@@ -68,7 +82,19 @@ The client splits on transport, not endpoint:
 - **`doJSON`**: single JSON request/response. Used by `extract/json`, `extract/markdown`, `generate/json`, `automate/{id}/input`. Schema-driven endpoints (`extract/json`, `generate/json`) return `json.RawMessage` verbatim because the response shape is caller-defined by the supplied JSON schema.
 - **`doStream`**: Server-Sent Events. Used by `automate` and `research`. Deliberately imposes **no** client timeout (a hard timeout would cut the stream); cancellation flows through `context`. `--timeout` only affects non-streaming calls.
 
+`client.WithTimeout` stores the duration on the `Client` and **only `doJSON` applies it**, via `context.WithTimeout`. It must never become an `http.Client.Timeout`: that bounds reading the response body too, so it would cut every SSE stream off at the deadline (it did, until fixed). Keeping it off the `http.Client` is also what lets it compose with `WithHTTPClient`/`WithDebug` in any order. `--timeout` defaults to `defaultTimeout` (2m, `cmd/root.go`) so a wedged request cannot hang forever; `--timeout 0` disables it, which the `flagTimeout > 0` guards in `cmd/root.go` and `cmd/mcp.go` implement by simply not passing the option.
+
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
+
+### Retries
+
+`internal/client/retry.go` holds the policy; `doJSON` and `doStream` hold the loops. Retryable statuses are 408, 409, 429, and 5xx, matching the SDKs: everything else means the request itself is wrong and replaying it cannot help. Backoff is exponential with **full jitter**, which matters because several CLI invocations in one CI job hit the same rate limit simultaneously and a fixed schedule would have them collide again. `Retry-After` beats the computed backoff (the server knows when it will be ready) but is capped at `maxRetryAfter` so a hostile or mistaken value cannot stall a build.
+
+Two invariants. The `--timeout` deadline wraps the **whole retry loop**, not each attempt, so backoff can never extend it; and `sleepFor` selects on the context, so cancellation ends the wait immediately. Requests are rebuilt per attempt because `newRequest` marshals from the body value: reusing one `*http.Request` would send an already-drained reader on the second try (`TestRetryBodyIsReplayed`).
+
+**`doStream` retries establishment only.** A non-2xx or transport failure arrives before any event, so replaying is safe and is the same transient case. Once the server answers 2xx the loop is over for good: the task is running, events may already have reached `fn`, and a partial stream cannot be replayed without duplicating what the caller has seen or dropping what it has not. The protocol offers no resume cursor. `TestStreamRetriesEstablishmentOnly` pins all three branches.
+
+`client.WithRetryNotify` takes a plain `func(RetryInfo)` so the client package keeps no `ui` dependency, mirroring `WithDebug`. `cmd/debug.go`'s `retrySink` renders it, and **returns nil under `--output json` without `--debug`**, so the client is not even asked to report and machine-facing stderr stays as quiet as before.
 
 ### Debug flag
 
@@ -83,6 +109,30 @@ The client splits on transport, not endpoint:
 Pull records provenance in `<store>/.manifest.json` (`schemas.Manifest`): the canonical SHA-256 (`CanonicalSHA`, formatting-insensitive) of each schema as pulled. `schema status` reads it to classify each schema — `modified` (local file's canonical hash ≠ recorded), `outdated` (current remote's hash ≠ recorded; skipped with `--local`), `missing`, `untracked`. `schema rm` deletes files and their manifest entries; `schema path` prints a stored schema's local path for scripting.
 
 The library index is cached per store in `<store>/.index-cache.json` (`schemas.CachedIndex`, 1h TTL, `--refresh` to bypass, stale-cache fallback when offline). Both bookkeeping dotfiles are skipped by `ListLocal`. Shell completion for `pull` selectors (from the cached index) and `--schema-name`/`rm`/`path` (from the local store) lives in `cmd/schema.go` and honours a typed `--storage`.
+
+Beyond the schema store, `cmd/helpers.go` supplies `fixedCompletions(...)` for the enum flags (`--effort`, `--mode`, `--output`, `--api-key-setup`) and `completeOrgs` for `--org` and the `auth switch` positional. `completeOrgs` reads the config store only and never calls the management API: completion runs on every tab press, and `--org` is defined to resolve locally anyway.
+
+### Batch input
+
+`cmd/batch.go` holds everything: `extract markdown` and `extract json` take `<url>...`, with a bare `-` expanding a newline-delimited list read from `stdinReader` (a package var, so the path is testable without a pipe, matching `login.go`'s `openBrowser`). Only one thing per invocation may read stdin, so `extract json - --schema -` is exit 2 naming both; the URL list is resolved **before** the schema so the conflict surfaces instead of the list silently arriving empty. Duplicates are dropped, which also stops two workers racing onto one filename.
+
+Every URL is validated up front, so a batch can only end 0 or 3 and a typo never costs a paid request.
+
+`runBatch` bounds concurrency with a semaphore and emits results in **input order** via a sliding window (`flushReady`), not completion order: these commands are aimed at CI, where output gets diffed. Emitting from the window rather than collecting everything first keeps progress visible on a long run. Files are written in the worker, unlocked, so a slow early URL does not hold back everyone else's writes.
+
+**One URL with no batch flags takes the original single-result path, byte for byte**, so existing scripts are unaffected; `--batch` forces the envelope so a wrapper can rely on one shape. `outputFileName` always appends an 8-hex SHA-256 prefix of the URL, making a name a pure function of its URL: adding a URL never renames another file, which is what makes repeat runs idempotent.
+
+`batchOutcome` prints only the per-URL detail and returns the count as the error, so the caller renders the total once rather than both saying it. Exit 3 for any failure, deliberately one code: per-URL detail is already in the output, and two codes for partial failure would be harder to branch on.
+
+### Cancellation
+
+`cmd/tabstack/main.go` installs one `signal.NotifyContext` (SIGINT, SIGTERM) around the context handed to `fang.Execute`, and every command threads `cmd.Context()` down to its request, so Ctrl-C cancels the call in flight instead of killing the process mid-request. Two `context.Background()` uses survive on purpose: the loopback shutdown in `cmd/login.go` (inheriting cancellation would reset the connection instead of flushing the callback page to the browser) and the completion helper in `cmd/schema.go`, which carries its own short timeout.
+
+`ErrInterrupted` is returned for a cancelled run and rendered by a custom `fang.WithErrorHandler` as a plain `cancelled` line rather than the red ERROR box, since Ctrl-C is the user getting what they asked for. It still exits 1. `classifyError` maps any wrapped `context.Canceled` onto it, because the signal handler is the only thing that cancels the root context.
+
+`--max-duration` (`agent automate`, `agent research`) bounds a **whole stream**, which `--timeout` deliberately never does. `classifyStreamError` tells the two endings apart by which context ended: the signal handler cancels the parent, while `--max-duration` expires only the derived one. Both exit 1, but only expiry explains itself, naming the flag and the elapsed time.
+
+Tests that call a `RunE` directly must `SetContext`: cobra only populates the command context via `Execute`, so `cmd.Context()` is otherwise nil and the request fails with "net/http: nil Context".
 
 ### Streaming outcome handling
 
@@ -100,21 +150,63 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 `cmd/helpers.go` defines `exitErr{code, err}` and `classifyError`:
 - **1**: runtime/network error
-- **2**: usage error (cobra default; also `withCode(2, ...)` for local input validation)
+- **2**: usage error, bad input, or missing configuration
 - **3**: API error (`client.APIError`) or in-band stream failure
 
+The codes are documented public behaviour, so **every usage error carries code 2 on the error itself**. `main.go` used to infer it by string-matching Cobra's message prefixes, which made the contract hostage to Cobra's wording; that function is gone. Three routes produce a coded usage error, and between them they cover every path:
+
+- **positional arity**: `exactArgsNamed`, `minArgsNamed`, `maxArgsNamed`, `noArgsNamed`, all returning `withCode(2, ...)`. `cobra.ArbitraryArgs` on `schema pull` is the one stock validator left, and is safe because it can never fail.
+- **a stray argument to a grouping command**: `applyGroupBehaviour` walks the tree in `NewRootCmd`.
+- **flag parsing**: one `root.SetFlagErrorFunc`, inherited by the whole tree, covering unknown flags, unknown shorthands, and values that fail to parse for their type.
+
+`applyGroupBehaviour` has to set **both** `Args` and `RunE`, for two reasons buried in Cobra: `Find` calls its own `legacyArgs` **only when `Args` is nil**, and `execute()` returns `flag.ErrHelp` for a non-runnable command **before** it reaches `ValidateArgs`. With only one of the two, `tabstack extract nope` printed help and exited 0. It also sets `skipClient`, because `ValidateArgs` runs before `PersistentPreRunE` and the no-argument help path would otherwise demand an API key just to print help. Annotations are not inherited, so leaves keep their own behaviour.
+
+`cmd/tabstack/main_test.go` asserts the whole table against the **built binary**, which is the only place the contract actually holds.
+
+`client.APIError` renders as `request failed: api error (NNN): <message>`, optionally followed by status guidance and `(trace id <id>)`. Three details are deliberate. The literal `api error (NNN):` substring is preserved because that is what anything grepping stderr matches on. It does **not** lead the string: fang title-cases the first word, which turned it into `Api error` and silently broke that same grep, so a plain word goes first. And `TraceID`/`RetryAfter` are captured in `decodeError` from `x-trace-id` and `Retry-After`, putting the support id on the failure rather than only under `--debug`, which you would have had to know to pass beforehand. `guidance()` covers 401, 403, and 429 only; a generic hint on every status would be noise. `console.APIError` carries `TraceID` too, since console failures also exit 3.
+
 `cmd/auth.go`'s `classifyConsoleError` is the auth-host counterpart: an expired or missing session is a configuration problem (2), a rejected management request is an API error (`console.APIError`, 3), anything else falls through to `classifyError`.
+
+### Support surfaces
+
+`RepoURL`/`IssuesURL`/`DocsURL` (`cmd/helpers.go`) back both the root help's HELP AND SUPPORT block and the bug-report footer, so the two cannot drift.
+
+`IsLikelyBug` gates that footer and the bar is deliberately high: only an exit-1 failure that is **not** cancellation, a deadline, or a `net.Error` qualifies. A footer on every dropped connection teaches people to ignore it, which costs the reports worth having. `*url.Error` and `*net.OpError` both satisfy `net.Error`, so one `errors.As` covers the HTTP stack.
+
+`redactedCommandLine` strips `--api-key`/`--key` values in both the spaced and `=` forms. This is the one place the CLI invites someone to paste their command line into a public issue, so it is the one place a secret must not survive; `TestRedactedCommandLineHidesSecrets` covers all four spellings.
 
 ### Output modes
 
 `resolveMode` (root.go): `--output pretty|json` wins; otherwise **pretty on a TTY, JSON when piped**, so `tabstack ... | jq` works without a flag. JSON streams emit NDJSON (one line per event). The renderer never reshapes caller-defined schema results.
 
+The one deliberate exception is `extract markdown --raw`, which prints the document body through `ui.Renderer.PrintRaw` **regardless of mode**. Mode-awareness is precisely what makes `> page.md` write a JSON envelope into a Markdown file, so raw output must not consult it. `PrintRaw` normalises to exactly one trailing newline (and writes nothing for empty content) so redirects and `$(...)` capture both behave. The JSON envelope from `PrintMarkdown` is left untouched: `--raw` is the escape hatch, so existing consumers keep working. It is mutually exclusive with `--metadata`, which would contradict it.
+
+**Every other command honours the mode.** `auth`, `keys`, `config`, and `switch` used to ignore it entirely and print human text into a pipe. They now branch on `jsonMode(r)` and emit through `emitJSON`, using **declared structs** (`statusJSON`, `configShowJSON`, `keyListJSON`, `createdKeyJSON`, `actionJSON`, `switchJSON`, `pullResult`, `rmResult`) rather than ad-hoc maps, so the wire shape is reviewable in one place. Single-confirmation commands share `actionJSON` so a script can branch on `.ok` without learning a type per command.
+
+Redaction is not mode-dependent: `config show` and `auth status` emit previews via `config.Redact` in JSON exactly as in pretty, the refresh token has no field at all, and `keys list` restates `console.APIKey` precisely so the plaintext it may carry cannot escape. `keys create` is the sole exception and emits `api_key`, because that is the one moment the API returns it and pretty mode prints it too. `TestConfigShowJSONRedactsEverything` guards this.
+
+**stdout is results, stderr is progress.** `schema pull`/`rm` write their per-schema lines to stderr in both modes and keep stdout for the tally (pretty) or the summary object (JSON). `keys revoke`'s "org now has no key" advice likewise moves to stderr under `--output json`.
+
+`schema list --local` emits objects keyed by `path`, matching `schema list`, so `jq '.[].path'` works against either; it previously emitted bare strings, giving one command two shapes.
+
 ### Input ergonomics
 
-`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
+`readInput`/`readJSON` (helpers.go) accept a literal string, `@file`, or `-` for stdin, mirroring curl's `-d`. They take the flag name as a second argument purely so a failure can say which part of the command to change.
+
+Reads go through the `stdinReader` package var, never `os.Stdin` directly, and every `-` path is gated by `requirePipedStdin`. Without that gate, `-` on an interactive terminal blocked forever with **no output at all**, so a forgotten pipe looked like a frozen shell rather than a mistake; it is now exit 2 naming the flag. `stdinIsTerminal` is a package var too, so both branches are testable without a pty (`TestStdinGuardRefusesATerminal`). Only one input per invocation may read stdin, which `resolveURLs` enforces against the URL list. `readJSON` validates JSON locally so a malformed schema fails with a clear message instead of an opaque API 400.
+
+`warnUnlikelySchema` goes one step further for schemas specifically: a JSON object carrying none of the keywords in `schemaShapeKeywords` probably describes example values (`{"title":"string"}`) rather than a shape, which is the commonest first mistake and otherwise surfaces only as an API 400. It is called from `resolveSchemaArg`, **not** `readJSON`, because `readJSON` also backs `--data`, where schema advice would be wrong. It is a hint and never an error: schemas are server-validated, so a local heuristic must not block a request that would have worked. It writes to `warnWriter()` (stderr, or `io.Discard` when `rootApp` is unset) and cannot touch stdout or the exit code. The keyword set is deliberately wider than `type`/`properties` so `$ref`, `enum`, and `oneOf` schemas do not cry wolf.
+
+## Documentation
+
+`docs/` is the command reference: `docs/README.md` is the index and shared conventions (credentials, key resolution, output rules, exit codes, environment), then one page per command group. Each page documents every subcommand's arguments, flags, examples, and **the exact `--output json` shape**. When adding or changing a command, update its page in the same commit: the JSON shapes written there are the closest thing to a published contract for them.
+
+The three docs have different jobs and should not be merged: `README.md` sells and orients, `docs/` is the reference, `AGENTS.md` is the machine-facing cheat sheet for LLM callers.
 
 ## Conventions
 
-- New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`nocache` flag names.
+- New endpoints: add a request type + method in `internal/client/`, then a leaf command in `cmd/`. Reuse `geoTarget()`, `readJSON()`, and the shared `effort`/`geo`/`no-cache` flag names (register the last with `addNoCacheFlag`, which also wires the hidden `--nocache` alias).
 - `GeoTarget` and `Effort` (`min`/`standard`/`max`) are shared across fetch-based endpoints.
-- Validate caller input locally where the server has known limits (e.g. `maxInstructionsLen = 20000` in `cmd/generate.go`).
+- Irreversible **remote** actions (`keys revoke`, `auth logout --all`, `auth sessions --revoke`) go through `confirmDestructive` and take `--yes`. Declining exits 0, matching `schema pull`'s `[q]uit`; a non-TTY without `--yes` is exit 2 naming the flag, never a silent proceed or a hang. `--force` keeps its separate meaning: overwrite a **local** file (`schema pull`).
+- Validate caller input locally where the server has known limits (e.g. `maxInstructionsLen = 20000` in `cmd/generate.go`). `cmd/helpers.go` holds the shared checks: `validEffort`, `validGeo` (alpha-2 only), `validURL` (http/https + host), and `validFetchFlags` which bundles effort and geo for the fetch-based commands.
+- Positional arity uses `exactArgsNamed("<url>")`, not `cobra.ExactArgs`, so the error names the argument instead of saying "accepts 1 arg(s), received 0".

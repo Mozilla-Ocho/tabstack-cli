@@ -265,6 +265,33 @@ func TestPermissionsOK(t *testing.T) {
 	}
 }
 
+// TestPermissionsState covers the distinction PermissionsOK deliberately drops:
+// a missing file and a 0600 file both report ok, but only one has bits worth
+// printing. `config show` needs to tell them apart.
+func TestPermissionsState(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "present")
+	if err := os.WriteFile(present, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mode, exists, ok := PermissionsState(present)
+	if !exists || !ok || mode != 0o600 {
+		t.Errorf("present: mode=%#o exists=%v ok=%v, want 0600/true/true", mode, exists, ok)
+	}
+
+	mode, exists, ok = PermissionsState(filepath.Join(dir, "missing"))
+	if exists {
+		t.Error("missing file reported as existing")
+	}
+	if !ok {
+		t.Error("missing file reported as a permissions problem")
+	}
+	if mode != 0 {
+		t.Errorf("missing file mode = %#o, want 0", mode)
+	}
+}
+
 func TestResolveAPIKeyPrecedence(t *testing.T) {
 	withOrgs := func() *Config {
 		return &Config{

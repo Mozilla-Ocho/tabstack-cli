@@ -33,10 +33,19 @@ type app struct {
 	client   *client.Client
 	renderer ui.Renderer
 
-	// orgOverride is the organisation id resolved from --org, empty when the
-	// flag was not used. It is per-invocation only and never written to config.
+	// orgOverride is the organisation id resolved from --org, or from a
+	// project file's active_org. Per-invocation only, never written to config.
 	orgOverride string
+
+	// project is the discovered .tabstack.toml, nil when there is none.
+	project *config.ProjectConfig
 }
+
+// defaultTimeout bounds non-streaming calls so a wedged request eventually
+// fails instead of hanging forever. It is deliberately generous: extract and
+// generate against a heavy page are legitimately slow. Streaming calls are
+// never bounded by it (see client.WithTimeout), and `--timeout 0` disables it.
+const defaultTimeout = 120 * time.Second
 
 // persistent flag values, bound on the root command.
 var (
@@ -48,6 +57,7 @@ var (
 	flagNoColor bool
 	flagTimeout time.Duration
 	flagDebug   bool
+	flagRetries int
 )
 
 // rootApp holds the constructed context for the current invocation.
@@ -62,8 +72,45 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "tabstack",
 		Short: "Command-line client for the Tabstack AI API",
-		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web " +
-			"research, and structured extraction and generation from any URL.",
+		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web\n" +
+			"research, and structured extraction and generation from any URL.\n" +
+			"\n" +
+			"New here? Run `tabstack auth login` first.\n" +
+			"\n" +
+			"CREDENTIALS\n" +
+			"  Two, never interchangeable. A session (`auth login`) is user scoped and\n" +
+			"  goes only to the console; an API key (`keys create`) is organisation\n" +
+			"  scoped and is what product commands send. A key is resolved from, in\n" +
+			"  order: --api-key, TABSTACK_API_KEY, the --org override's stored key,\n" +
+			"  then the active organisation's.\n" +
+			"\n" +
+			"ENVIRONMENT\n" +
+			"  TABSTACK_API_KEY       API key for product calls; overrides stored keys\n" +
+			"  TABSTACK_BASE_URL      product API host (default https://api.tabstack.ai/v1)\n" +
+			"  TABSTACK_AUTH_URL      auth and management host (default https://console.tabstack.ai)\n" +
+			"  TABSTACK_OAUTH_SCOPES  override the scopes requested at login\n" +
+			"  NO_COLOR               disable coloured output, same as --no-color\n" +
+			"  XDG_CONFIG_HOME        where config.toml and pulled schemas live\n" +
+			"\n" +
+			"EXIT CODES\n" +
+			"  0  success\n" +
+			"  1  runtime or network error\n" +
+			"  2  usage error, bad input, or missing configuration\n" +
+			"  3  the API rejected the request, or a streamed task failed\n" +
+			"\n" +
+			"OUTPUT\n" +
+			"  Pretty on a terminal, JSON when piped, so `tabstack ... | jq` needs no\n" +
+			"  flag. Force it with --output. Streaming commands emit NDJSON, one event\n" +
+			"  per line. Results go to stdout; progress, prompts, and warnings go to\n" +
+			"  stderr.\n" +
+			"\n" +
+			"HELP AND SUPPORT\n" +
+			"  Docs          " + DocsURL + "\n" +
+			"  Source        " + RepoURL + "\n" +
+			"  Report a bug  " + IssuesURL + "/new\n" +
+			"  Man page      tabstack man\n" +
+			"  Completion    tabstack completion <bash|zsh|fish|powershell>",
+		Example:       "  # Sign in once, then check it works\n  tabstack auth login\n  tabstack extract markdown https://example.com\n\n  # Extract structured data using a schema from the public library\n  tabstack schema pull job-posting\n  tabstack extract json https://example.com/jobs/1 --schema-name job-posting\n\n  # Output is JSON automatically when piped, so jq just works\n  tabstack extract markdown https://example.com | jq -r .content",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
@@ -73,38 +120,112 @@ func NewRootCmd() *cobra.Command {
 		// any credential exists.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Annotations["skipClient"] == "true" {
-				return setupRendererOnly()
+				return setupRendererOnly(cmd)
 			}
-			return setupApp()
+			return setupApp(cmd)
 		},
 	}
 
+	// Only the two flags every command genuinely uses live on the root. The
+	// rest are registered per subtree by the addXFlags helpers below, so help
+	// for `schema list` or `config show` stops advertising --api-key and
+	// --timeout, which those commands never read. See addProductFlags.
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagAPIKey, "api-key", "", "API key (overrides env and stored keys)")
-	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
-	pf.StringVar(&flagBaseURL, "base-url", "", "product API base URL")
-	pf.StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")
-	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
-	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	// --debug stays global even though only product-host calls are instrumented.
+	// Cobra decides whether a flag consumes the next argument while it is still
+	// looking for the subcommand, and it can only do that for flags it already
+	// knows. Registering this boolean per subtree made `tabstack --debug extract
+	// markdown URL` swallow "extract" as the flag's value and fail with
+	// "Unknown command markdown". Valued flags such as --base-url survive that
+	// position by luck; booleans cannot.
 	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
+	_ = root.RegisterFlagCompletionFunc("output", fixedCompletions("pretty", "json"))
+
+	agent, extract, generate := newAgentCmd(), newExtractCmd(), newGenerateCmd()
+	auth, keys, cfgCmd, mcp := newAuthCmd(), newKeysCmd(), newConfigCmd(), newMCPCmd()
+
+	// Product-host commands: they build a client, so they need a credential, a
+	// base URL, a timeout, and can be traced. --org selects which stored key
+	// goes out, which only means anything when a key is being sent.
+	for _, c := range []*cobra.Command{agent, extract, generate} {
+		addProductFlags(c)
+		addOrgFlag(c)
+	}
+
+	// Auth-host commands talk to the console, so they take --auth-url. keys
+	// also takes --org (`keys create --org acme`); under auth only login reads
+	// it, so it is registered there rather than on the whole group.
+	addAuthHostFlag(auth)
+	addAuthHostFlag(keys)
+	addOrgFlag(keys)
+
+	// config show prints both hosts as they would resolve, so it accepts both
+	// overrides to preview them. It sends nothing anywhere.
+	addBaseURLFlag(cfgCmd)
+	addAuthHostFlag(cfgCmd)
+
+	// mcp straddles both hosts: product tools use the API key, management
+	// tools use the session. It resolves the key without an --org override
+	// (see resolveMCPKey), so it does not take that flag.
+	addProductFlags(mcp)
+	addAuthHostFlag(mcp)
+
+	// schema is deliberately absent: it talks only to raw.githubusercontent.com
+	// and the local store, so none of these apply to it.
+	root.AddCommand(agent, extract, generate, newSchemaCmd(), auth, keys, cfgCmd, mcp)
+
+	// Exit codes are documented public behaviour, so every usage error has to
+	// carry code 2 on the error itself rather than being recognised from its
+	// text later. Three routes produce one:
+	//
+	//   - positional arity, handled by the *ArgsNamed validators per command;
+	//   - a stray argument to a grouping command, wired up here;
+	//   - flag parsing, which Cobra funnels through FlagErrorFunc.
+	//
+	// FlagErrorFunc is inherited by the whole tree from the root, so one
+	// registration covers unknown flags, unknown shorthands, and values that
+	// fail to parse for their type.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return withCode(2, err)
+	})
+	applyGroupBehaviour(root)
+
+	return root
+}
+
+// addProductFlags registers the flags that only mean something when a command
+// builds a product-API client.
+func addProductFlags(cmd *cobra.Command) {
+	pf := cmd.PersistentFlags()
+	// The warning is on the flag, not only in the README: the person about to
+	// paste a key into a CI script is looking at --help, not the docs.
+	pf.StringVar(&flagAPIKey, "api-key", "", "key for the product API; overrides env and stored keys. Visible in shell history and ps, so prefer TABSTACK_API_KEY in CI")
+	pf.StringVar(&flagAPIKey, "key", "", "alias for --api-key")
+	pf.DurationVar(&flagTimeout, "timeout", defaultTimeout, "request timeout for non-streaming calls; 0 disables (e.g. 30s)")
+	pf.IntVar(&flagRetries, "retries", client.DefaultRetries, "retry transient failures (408, 409, 429, 5xx) this many times; 0 disables")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
+	addBaseURLFlag(cmd)
+}
 
-	root.AddCommand(
-		newAgentCmd(),
-		newExtractCmd(),
-		newGenerateCmd(),
-		newSchemaCmd(),
-		newAuthCmd(),
-		newKeysCmd(),
-		newConfigCmd(),
-		newMCPCmd(),
-	)
+// addBaseURLFlag registers --base-url on its own, for config show, which
+// displays the resolved product host without ever calling it.
+func addBaseURLFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagBaseURL, "base-url", "", "product API base URL")
+}
 
-	return root
+// addAuthHostFlag registers --auth-url for commands that reach the console.
+func addAuthHostFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagAuthURL, "auth-url", "", "auth and management host URL")
+}
+
+// addOrgFlag registers the one-shot organisation override.
+func addOrgFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
+	_ = cmd.RegisterFlagCompletionFunc("org", completeOrgs)
 }
 
 // resolveMode decides the output mode. An explicit --output wins; otherwise we
@@ -142,16 +263,23 @@ func newRenderer() (ui.Renderer, error) {
 
 // setupApp loads config, resolves the product credential, and builds the client.
 // It is the pre-run for every command that talks to the product API.
-func setupApp() error {
-	base, err := setupBase()
+func setupApp(cmd *cobra.Command) error {
+	base, err := setupBase(cmd)
 	if err != nil {
 		return err
 	}
 
-	if flagOrg != "" {
-		id, err := resolveOrgLocal(base.cfg, flagOrg)
+	// --org wins; a project file's active_org is the next rung down, above the
+	// user's own active organisation. It is a selector, not a credential, so a
+	// repository can say which of *your* organisations it works against.
+	orgSelector, orgSource := flagOrg, "--org"
+	if orgSelector == "" && base.project != nil && base.project.ActiveOrg != "" {
+		orgSelector, orgSource = base.project.ActiveOrg, base.project.Path
+	}
+	if orgSelector != "" {
+		id, err := resolveOrgLocal(base.cfg, orgSelector)
 		if err != nil {
-			return withCode(2, err)
+			return withCode(2, fmt.Errorf("organisation %q, selected by %s: %w", orgSelector, orgSource, err))
 		}
 		base.orgOverride = id
 	}
@@ -172,6 +300,10 @@ func setupApp() error {
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))
 	}
+	opts = append(opts, client.WithRetries(flagRetries))
+	if sink := retrySink(base.renderer, flagDebug); sink != nil {
+		opts = append(opts, client.WithRetryNotify(sink))
+	}
 	if flagDebug {
 		opts = append(opts, client.WithDebug(debugSink(base.renderer, nil)))
 	}
@@ -181,8 +313,8 @@ func setupApp() error {
 	// stderr so it shows up in logs and terminals without contaminating piped
 	// stdout.
 	if base.orgOverride != "" {
-		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s)\n",
-			base.cfg.OrgName(base.orgOverride), base.orgOverride)
+		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s), from %s\n",
+			base.cfg.OrgName(base.orgOverride), base.orgOverride, orgSource)
 	}
 
 	rootApp = base
@@ -192,8 +324,8 @@ func setupApp() error {
 // setupRendererOnly builds the renderer and loads config for commands that do
 // not need a product client (auth, keys, schema). No credential is required, so
 // these still work on a fresh install.
-func setupRendererOnly() error {
-	base, err := setupBase()
+func setupRendererOnly(cmd *cobra.Command) error {
+	base, err := setupBase(cmd)
 	if err != nil {
 		return err
 	}
@@ -203,7 +335,17 @@ func setupRendererOnly() error {
 
 // setupBase does the work common to both setups: renderer, credential store,
 // and config load.
-func setupBase() (*app, error) {
+func setupBase(cmd *cobra.Command) (*app, error) {
+	// Project config first: it can set --output, so it has to land before the
+	// renderer reads that flag.
+	project, err := loadProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	if err := applyProjectConfig(cmd, project); err != nil {
+		return nil, err
+	}
+
 	renderer, err := newRenderer()
 	if err != nil {
 		return nil, withCode(2, err)
@@ -218,7 +360,7 @@ func setupBase() (*app, error) {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
 
-	return &app{store: store, cfg: cfg, renderer: renderer}, nil
+	return &app{store: store, cfg: cfg, renderer: renderer, project: project}, nil
 }
 
 // newStore builds the credential store. It is a package var so tests can point

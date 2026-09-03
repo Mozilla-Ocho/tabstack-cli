@@ -78,6 +78,10 @@ type APIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+
+	// TraceID is the x-trace-id response header. Console failures also exit 3,
+	// so they carry the same support id as product failures.
+	TraceID string
 }
 
 // orNil returns e as an error, or a nil error when e is nil. It avoids the
@@ -95,10 +99,16 @@ func (e *APIError) Error() string {
 	if msg == "" {
 		msg = e.Code
 	}
+	var b strings.Builder
 	if msg != "" {
-		return fmt.Sprintf("console error (%d): %s", e.StatusCode, msg)
+		fmt.Fprintf(&b, "console error (%d): %s", e.StatusCode, msg)
+	} else {
+		fmt.Fprintf(&b, "console error: status %d", e.StatusCode)
 	}
-	return fmt.Sprintf("console error: status %d", e.StatusCode)
+	if e.TraceID != "" {
+		fmt.Fprintf(&b, " (trace id %s)", e.TraceID)
+	}
+	return b.String()
 }
 
 // ErrSessionExpired means the session could not be made to work: it was
@@ -229,7 +239,11 @@ func decodeError(resp *http.Response) *APIError {
 		ErrorDescription string `json:"error_description"`
 		Message          string `json:"message"`
 	}
-	apiErr := &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(data))}
+	apiErr := &APIError{
+		StatusCode: resp.StatusCode,
+		Message:    strings.TrimSpace(string(data)),
+		TraceID:    resp.Header.Get("X-Trace-Id"),
+	}
 	if json.Unmarshal(data, &payload) == nil && (payload.Error != "" || payload.ErrorDescription != "" || payload.Message != "") {
 		apiErr.Code = payload.Error
 		// Prefer the human-readable detail. The console carries it in

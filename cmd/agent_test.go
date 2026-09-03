@@ -1,9 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 )
@@ -137,4 +144,114 @@ func TestExtractMessage(t *testing.T) {
 			t.Errorf("extractMessage(%s) = %q, want %q", tc.data, got, tc.want)
 		}
 	}
+}
+
+// sseServer serves an endless SSE stream, one event per tick, so a test can
+// cancel or time out partway through a live stream.
+func sseServer(t *testing.T, tick time.Duration) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(tick):
+				_, _ = io.WriteString(w, "event: tick\ndata: {}\n\n")
+				flusher.Flush()
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestStreamCancellation covers the two ways a long stream can be stopped.
+// Both exit 1, but they mean different things: the user asked, versus a limit
+// they set was reached, so only the latter explains itself.
+func TestStreamCancellation(t *testing.T) {
+	t.Run("interrupt returns promptly as cancelled", func(t *testing.T) {
+		isolate(t)
+		setTestApp(t)
+		srv := sseServer(t, 10*time.Millisecond)
+		rootApp.client = client.New("k", srv.URL)
+
+		// Stands in for the signal handler cancelling the root context.
+		parent, cancelParent := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(80 * time.Millisecond)
+			cancelParent()
+		}()
+
+		start := time.Now()
+		_, err := runStream(func(fn func(client.Event) error) error {
+			return rootApp.client.Research(parent, client.ResearchRequest{Query: "q"}, fn)
+		})
+		coded := classifyStreamError(parent, err, 0, time.Since(start))
+
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("took %v, want a prompt return", elapsed)
+		}
+		if got := codeOf(coded); got != 1 {
+			t.Errorf("exit code = %d, want 1", got)
+		}
+		if !errors.Is(coded, ErrInterrupted) {
+			t.Errorf("err = %v, want ErrInterrupted so it renders as a plain line", coded)
+		}
+	})
+
+	t.Run("max-duration expiry names the flag and the elapsed time", func(t *testing.T) {
+		isolate(t)
+		setTestApp(t)
+		srv := sseServer(t, 10*time.Millisecond)
+		rootApp.client = client.New("k", srv.URL)
+
+		parent := context.Background()
+		const limit = 100 * time.Millisecond
+		ctx, cancel := streamContext(parent, limit)
+		defer cancel()
+
+		start := time.Now()
+		_, err := runStream(func(fn func(client.Event) error) error {
+			return rootApp.client.Research(ctx, client.ResearchRequest{Query: "q"}, fn)
+		})
+		coded := classifyStreamError(parent, err, limit, time.Since(start))
+
+		if got := codeOf(coded); got != 1 {
+			t.Errorf("exit code = %d, want 1", got)
+		}
+		if errors.Is(coded, ErrInterrupted) {
+			t.Error("expiry should not look like a user interrupt")
+		}
+		for _, want := range []string{"--max-duration", limit.String()} {
+			if !strings.Contains(coded.Error(), want) {
+				t.Errorf("message missing %q: %v", want, coded)
+			}
+		}
+	})
+
+	t.Run("an unset max-duration leaves the context alone", func(t *testing.T) {
+		parent := context.Background()
+		ctx, cancel := streamContext(parent, 0)
+		defer cancel()
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("no deadline should be set when --max-duration is unset")
+		}
+		if ctx != parent {
+			t.Error("the parent context should be passed through unchanged")
+		}
+	})
+
+	t.Run("an ordinary stream failure is untouched", func(t *testing.T) {
+		parent := context.Background()
+		err := classifyStreamError(parent, errors.New("boom"), 0, time.Second)
+		if got := codeOf(err); got != 1 {
+			t.Errorf("exit code = %d, want 1", got)
+		}
+		if errors.Is(err, ErrInterrupted) {
+			t.Error("a plain failure should not be reported as cancelled")
+		}
+	})
 }
