@@ -45,14 +45,36 @@ func scriptPath(t *testing.T) string {
 	return p
 }
 
-// newRepo makes a git repo in a temp dir with the script installed at
-// scripts/lint-copy.sh, mirroring the layout the script assumes.
-func newRepo(t *testing.T) string {
+// gitEnv isolates a fixture repo from the contributor's own git setup. Without
+// it the throwaway repos inherit ~/.gitconfig, where commit.gpgsign (fails, or
+// hangs on a passphrase prompt), core.hooksPath (a pre-commit framework), or
+// grep.column (shifts git grep's record fields) would decide the result of a
+// test that is not about any of them.
+func gitEnv(extra ...string) []string {
+	env := append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_ATTR_NOSYSTEM=1",
+	)
+	return append(env, extra...)
+}
+
+// git runs one git command in dir with the isolated environment.
+func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = gitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
-	dir := t.TempDir()
+}
+
+// installScript lays the script out at scripts/lint-copy.sh in dir, the layout
+// the script assumes when it cds to its own parent.
+func installScript(t *testing.T, dir string) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -63,43 +85,50 @@ func newRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "scripts", "lint-copy.sh"), src, 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
-	for _, args := range [][]string{
-		{"init", "-q", "."},
-		{"config", "user.email", "test@example.com"},
-		{"config", "user.name", "test"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
+}
+
+// newRepo makes a git repo in a temp dir with the script installed at
+// scripts/lint-copy.sh.
+func newRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
 	}
+	dir := t.TempDir()
+	installScript(t, dir)
+	git(t, dir, "-c", "init.defaultBranch=main", "init", "-q", ".")
+	git(t, dir, "config", "user.email", "test@example.com")
+	git(t, dir, "config", "user.name", "test")
 	return dir
 }
 
+// write creates a fixture file, making any parent directories, so nested
+// pathspec behaviour (docs/README.md) can be covered.
 func write(t *testing.T, dir, name, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+	path := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", name, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 }
 
 func commitAll(t *testing.T, dir string) {
 	t.Helper()
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "fixture"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
+	git(t, dir, "add", "-A")
+	// --no-gpg-sign and --no-verify belt-and-brace the config isolation: a
+	// signing key or a hook must not decide whether the lint gets to run.
+	git(t, dir, "commit", "-qm", "fixture", "--no-gpg-sign", "--no-verify")
 }
 
 // run executes the script in dir and returns its exit code and combined output.
-func run(t *testing.T, dir string) (int, string) {
+func run(t *testing.T, dir string, env ...string) (int, string) {
 	t.Helper()
 	cmd := exec.Command("./scripts/lint-copy.sh")
 	cmd.Dir = dir
+	cmd.Env = gitEnv(env...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return 0, string(out)
@@ -197,10 +226,34 @@ func TestLintCopy(t *testing.T) {
 			want:    exitClean,
 		},
 		{
+			// The URL refinement lives in the Go branch of strip_allowed, so
+			// this has to be a .go file to exercise it: on a .md path only the
+			// <!-- --> branch is consulted and the line fails either way.
 			name:    "a URL is not a comment leader",
-			file:    "README.md",
-			content: "see https://x.dev for " + bannedTerm + " tips, lint-copy: allow\n",
+			file:    "help.go",
+			content: "package p\n\nconst u = \"see https://x.dev for " + bannedTerm + " tips, lint-copy: allow\"\n",
 			commit:  true,
+			want:    exitViolation,
+		},
+		{
+			name:    "a nested doc is in scope",
+			file:    "docs/README.md",
+			content: "a " + emDash + " b\n",
+			commit:  true,
+			want:    exitViolation,
+		},
+		{
+			name:    "nested Go source is in scope",
+			file:    "internal/sub/x.go",
+			content: "package sub\n\nconst use = \"" + bannedTerm + " a page\"\n",
+			commit:  true,
+			want:    exitViolation,
+		},
+		{
+			name:    "a nested untracked doc is in scope",
+			file:    "docs/new/NOTES.md",
+			content: "new doc with " + bannedTerm + "\n",
+			commit:  false,
 			want:    exitViolation,
 		},
 		{
@@ -259,16 +312,7 @@ func TestLintCopyFailsClosed(t *testing.T) {
 		t.Skip("git not available")
 	}
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	src, err := os.ReadFile(scriptPath(t))
-	if err != nil {
-		t.Fatalf("read script: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "scripts", "lint-copy.sh"), src, 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
+	installScript(t, dir)
 	write(t, dir, "README.md", "a "+emDash+" b with "+bannedTerm+"\n")
 
 	code, out := run(t, dir)
@@ -277,5 +321,49 @@ func TestLintCopyFailsClosed(t *testing.T) {
 	}
 	if strings.Contains(out, "lint-copy: clean") {
 		t.Fatalf("git failure reported as clean:\n%s", out)
+	}
+}
+
+// TestLintCopyUnreadableFileFailsClosed covers the per-file half of failing
+// closed: git grep reports an unreadable path on stderr but still exits 1, the
+// same code as "no match", so the scan must key on stderr as well as the code.
+func TestLintCopyUnreadableFileFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable files")
+	}
+	dir := newRepo(t)
+	write(t, dir, "README.md", "clean\n")
+	commitAll(t, dir)
+	write(t, dir, "secret.md", "upstream "+bannedTerm+"\n")
+	if err := os.Chmod(filepath.Join(dir, "secret.md"), 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "secret.md"), 0o644) })
+
+	code, out := run(t, dir)
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitError, out)
+	}
+	if strings.Contains(out, "lint-copy: clean") {
+		t.Fatalf("unreadable file reported as clean:\n%s", out)
+	}
+}
+
+// TestLintCopyIgnoresGrepColumnConfig pins --no-column: with grep.column set,
+// git grep -n emits "path:line:col:content", which shifts awk's fields and put
+// a colon in front of a column-0 "//" so the Go escape hatch stops matching.
+func TestLintCopyIgnoresGrepColumnConfig(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "help.go", "package p\n\n// fine "+emDash+" really, lint-copy: allow\n")
+	commitAll(t, dir)
+
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(cfg, []byte("[grep]\n\tcolumn = true\n\tlineNumber = true\n"), 0o644); err != nil {
+		t.Fatalf("write gitconfig: %v", err)
+	}
+
+	code, out := run(t, dir, "GIT_CONFIG_GLOBAL="+cfg)
+	if code != exitClean {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitClean, out)
 	}
 }

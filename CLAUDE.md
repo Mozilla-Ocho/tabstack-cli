@@ -25,7 +25,7 @@ Single test: `go test ./cmd -run TestResolveSchemaArg -v` (packages are `./cmd`,
 
 Version is injected via `-ldflags -X .../cmd.version=$(VERSION)`; `VERSION` comes from `git describe --tags --always --dirty`, falling back to `dev`. Releases are goreleaser on a `v*` tag (`.goreleaser.yaml`, `.github/workflows/release.yml`).
 
-Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/copy-lint/vet/build/`test -race` on push and PRs (`.github/workflows/ci.yml`). `client.WithHTTPClient` injects a mock `*http.Client` for tests; no unit test makes a live call. `scripts/smoke-test.sh` (`make smoke`) exercises every command against the live API.
+Tests live alongside each package (`*_test.go`); GitHub Actions (`.github/workflows/ci.yml`) runs gofmt/vet/build/`test -race`/copy-lint on push and PRs, copy lint last so a stray em dash cannot mask a real correctness failure. `client.WithHTTPClient` injects a mock `*http.Client` for tests; no unit test makes a live call. `scripts/smoke-test.sh` (`make smoke`) exercises every command against the live API.
 
 ## Architecture
 
@@ -136,7 +136,7 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 Escape hatch: append `lint-copy: allow` inside a comment that is real for that file type, `//` for Go and `<!-- -->` for Markdown. A `//` inside a URL does not count, and a Markdown comment does not exempt a Go line (or the reverse).
 
-The lint scans untracked-but-not-ignored files as well as tracked ones, so a brand new file fails locally instead of after `git add` in CI. It runs through `git grep`, which exits 1 for "no match" and >1 for a git-level error, so the script **fails closed**: a broken checkout exits 2 rather than reporting clean. `scripts/lint_copy_test.go` covers the scope, escape-hatch, and fail-closed behaviour under `go test ./...`.
+The lint scans untracked-but-not-ignored files as well as tracked ones, so a brand new file fails locally instead of after `git add` in CI. It runs through `git grep`, which exits 1 for "no match" and >1 for a git-level error, so the script **fails closed**: a broken checkout exits 2 rather than reporting clean. A *per-file* failure (an unreadable path) is only reported on stderr and still exits 1, so any git grep stderr is exit 2 as well: a file the scan could not read must never count as clean. `--no-color`/`--no-column` neutralise output-shaping git config, since a contributor's `grep.column` would shift the record fields and break the escape hatch. `scripts/lint_copy_test.go` covers the scope, escape-hatch, and fail-closed behaviour under `go test ./...`.
 
 ### Docs that must track the code
 

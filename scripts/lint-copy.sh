@@ -28,7 +28,13 @@
 # safety, and error reporting are git's problem, not the shell's. git grep exits
 # 1 for "no match" and >1 for a real failure, which is what makes this gate fail
 # closed: any git-level error (not a repo, dubious ownership, missing git) exits
-# 2 instead of silently reporting clean.
+# 2 instead of silently reporting clean. A per-file failure (an unreadable path)
+# is only reported on stderr and still exits 1, so anything on stderr is an
+# error too: a file the scan could not read must never count as clean.
+#
+# Output-shaping git config is neutralised explicitly (--no-color, --no-column):
+# a contributor's `grep.column` would otherwise shift the record fields and
+# break the escape hatch below.
 #
 # To intentionally allow one of these on a specific line, append the marker
 #   lint-copy: allow
@@ -68,19 +74,27 @@ strip_allowed() {
 
 # scan PATTERN DESCRIPTION PATHSPEC... — search the pathspecs for PATTERN, print
 # DESCRIPTION and the hits (minus allowed lines), and flag failure. Any git-level
-# error aborts with exit 2 rather than passing.
+# error, whole-invocation or per-file, aborts with exit 2 rather than passing.
 scan() {
 	local pattern=$1
 	local desc=$2
 	shift 2
-	local out status
-	if out=$(git grep --no-color --untracked -I -inE -e "$pattern" -- "$@"); then
+	local out status errfile errs
+	errfile=$(mktemp "${TMPDIR:-/tmp}/lint-copy.XXXXXX")
+	if out=$(git grep --no-color --no-column --untracked -I -inE -e "$pattern" -- "$@" 2>"$errfile"); then
 		status=0
 	else
 		status=$?
 	fi
-	if [ "$status" -gt 1 ]; then
+	errs=$(cat "$errfile")
+	rm -f "$errfile"
+	# >1 is a whole-invocation failure; anything on stderr is a per-file one
+	# (git grep still exits 1 for those), and both mean the scan is incomplete.
+	if [ "$status" -gt 1 ] || [ -n "$errs" ]; then
 		echo "lint-copy: git grep failed (exit $status) while scanning for: $desc" >&2
+		if [ -n "$errs" ]; then
+			printf '%s\n' "$errs" >&2
+		fi
 		exit 2
 	fi
 	[ -n "$out" ] || return 0

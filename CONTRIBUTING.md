@@ -26,7 +26,7 @@ make smoke      # live API smoke test (needs an API key)
 Before opening a pull request:
 
 - Run `make lint` and `make test`: CI runs the same checks (`gofmt`, `go vet`,
-  copy lint, `go build`, `go test -race`) and must pass.
+  `go build`, `go test -race`, then copy lint) and must pass.
 - Copy lint (`scripts/lint-copy.sh`) enforces Tabstack voice: no em dashes in
   `README.md`, `AGENTS.md`, or Go source, and no scraper-family terms <!-- lint-copy: allow -->
   in docs or Go source. En dashes in numeric ranges are fine. New files are
