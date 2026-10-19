@@ -55,11 +55,7 @@ func runMCP(ctx context.Context) error {
 		return err
 	}
 
-	var opts []client.Option
-	if flagTimeout > 0 {
-		opts = append(opts, client.WithTimeout(flagTimeout))
-	}
-	product := client.New(apiKey, rootApp.cfg.ResolveBaseURL(flagBaseURL), opts...)
+	product := client.New(apiKey, rootApp.cfg.ResolveBaseURL(flagBaseURL), productClientOpts(rootApp.renderer)...)
 
 	// Console client for the management tools. It may be session-less, in which
 	// case those tools return a sign-in error; the product tools still work.

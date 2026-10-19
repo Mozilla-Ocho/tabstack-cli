@@ -92,3 +92,34 @@ func TestDebugLineOmitsAbsentFields(t *testing.T) {
 		t.Errorf("line missing elapsed:\n%s", line)
 	}
 }
+
+func TestRetryLine(t *testing.T) {
+	got := retryLine(client.RetryInfo{Attempt: 1, MaxRetries: 2, Status: 429, Wait: 3 * time.Second})
+	if want := "429 too many requests, retrying in 3s (1/2)"; got != want {
+		t.Errorf("retryLine = %q, want %q", got, want)
+	}
+}
+
+func TestRetrySinkJSONToStderr(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	r := ui.Renderer{Out: &out, Err: &errBuf, Mode: ui.ModeJSON, Styles: ui.NewStyles(true)}
+	retrySink(r)(client.RetryInfo{Attempt: 2, MaxRetries: 2, Status: 503, Wait: 1500 * time.Millisecond})
+
+	if out.Len() != 0 {
+		t.Errorf("retry notice leaked to stdout: %q", out.String())
+	}
+	var got struct {
+		Retry struct {
+			Status     int   `json:"status"`
+			Attempt    int   `json:"attempt"`
+			MaxRetries int   `json:"max_retries"`
+			WaitMS     int64 `json:"wait_ms"`
+		} `json:"retry"`
+	}
+	if err := json.Unmarshal(errBuf.Bytes(), &got); err != nil {
+		t.Fatalf("stderr not JSON: %v: %q", err, errBuf.String())
+	}
+	if got.Retry.Status != 503 || got.Retry.Attempt != 2 || got.Retry.MaxRetries != 2 || got.Retry.WaitMS != 1500 {
+		t.Errorf("retry = %+v", got.Retry)
+	}
+}

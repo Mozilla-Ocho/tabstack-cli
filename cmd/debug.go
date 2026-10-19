@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -93,4 +94,42 @@ func resetIn(reset time.Time, now func() time.Time) (string, bool) {
 	}
 	d := max(reset.Sub(now()).Round(time.Second), 0)
 	return d.String(), true
+}
+
+// retrySink reports each retry (429, or 503 with Retry-After) on stderr, so a call that pauses to
+// honour Retry-After says why instead of looking hung. Like debugSink it never
+// touches stdout, and in JSON output mode it emits a JSON object. It is always
+// on, not gated by --debug: a silent multi-second stall is worse than a line.
+func retrySink(r ui.Renderer) func(client.RetryInfo) {
+	return func(ri client.RetryInfo) {
+		if r.Mode == ui.ModeJSON {
+			fmt.Fprintln(r.Err, retryJSON(ri))
+			return
+		}
+		fmt.Fprintln(r.Err, r.Styles.Muted.Render(retryLine(ri)))
+	}
+}
+
+// retryLine is the human-readable retry notice.
+func retryLine(ri client.RetryInfo) string {
+	return fmt.Sprintf("%d %s, retrying in %s (%d/%d)",
+		ri.Status, strings.ToLower(http.StatusText(ri.Status)), ri.Wait.Round(time.Millisecond), ri.Attempt, ri.MaxRetries)
+}
+
+// retryJSON is the machine-readable retry notice, one line.
+func retryJSON(ri client.RetryInfo) string {
+	payload := struct {
+		Retry struct {
+			Status     int   `json:"status"`
+			Attempt    int   `json:"attempt"`
+			MaxRetries int   `json:"max_retries"`
+			WaitMS     int64 `json:"wait_ms"`
+		} `json:"retry"`
+	}{}
+	payload.Retry.Status = ri.Status
+	payload.Retry.Attempt = ri.Attempt
+	payload.Retry.MaxRetries = ri.MaxRetries
+	payload.Retry.WaitMS = ri.Wait.Milliseconds()
+	out, _ := json.Marshal(payload)
+	return string(out)
 }

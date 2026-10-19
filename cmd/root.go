@@ -48,6 +48,7 @@ var (
 	flagNoColor bool
 	flagTimeout time.Duration
 	flagDebug   bool
+	flagRetries int
 )
 
 // rootApp holds the constructed context for the current invocation.
@@ -89,6 +90,7 @@ func NewRootCmd() *cobra.Command {
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
 	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
 	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
+	pf.IntVar(&flagRetries, "max-retries", client.DefaultMaxRetries, "retries for a rate-limited call (429, or 503 with Retry-After), honouring the server's wait; 0 disables")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
@@ -168,14 +170,7 @@ func setupApp() error {
 	}
 	base.key = res
 
-	var opts []client.Option
-	if flagTimeout > 0 {
-		opts = append(opts, client.WithTimeout(flagTimeout))
-	}
-	if flagDebug {
-		opts = append(opts, client.WithDebug(debugSink(base.renderer, nil)))
-	}
-	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), opts...)
+	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), productClientOpts(base.renderer)...)
 
 	// When --org is in play, say which organisation we are acting as. It goes to
 	// stderr so it shows up in logs and terminals without contaminating piped
@@ -187,6 +182,23 @@ func setupApp() error {
 
 	rootApp = base
 	return nil
+}
+
+// productClientOpts turns the persistent flags into product client options. It
+// is shared by every command that builds a product client, including `mcp`, so
+// timeout, retry, and debug behave the same everywhere.
+func productClientOpts(r ui.Renderer) []client.Option {
+	opts := []client.Option{
+		client.WithRetry(flagRetries, client.DefaultMaxRetryWait),
+		client.WithRetryNotify(retrySink(r)),
+	}
+	if flagTimeout > 0 {
+		opts = append(opts, client.WithTimeout(flagTimeout))
+	}
+	if flagDebug {
+		opts = append(opts, client.WithDebug(debugSink(r, nil)))
+	}
+	return opts
 }
 
 // setupRendererOnly builds the renderer and loads config for commands that do
