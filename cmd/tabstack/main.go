@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"image/color"
+	"io"
 	"os"
 	"strings"
 
@@ -76,6 +77,7 @@ func main() {
 		root,
 		fang.WithVersion(cmd.Version()),
 		fang.WithColorSchemeFunc(brandScheme),
+		fang.WithErrorHandler(errorHandler),
 	); err != nil {
 		if c, ok := errors.AsType[coded](err); ok {
 			os.Exit(c.Code())
@@ -85,6 +87,17 @@ func main() {
 		}
 		os.Exit(1)
 	}
+}
+
+// errorHandler prints a failed command's error. Under JSON output (-o json, or
+// stdout piped) it is a single {"error": ...} object, so an agent parsing
+// stderr never meets fang's styled block; otherwise fang renders it as usual.
+func errorHandler(w io.Writer, styles fang.Styles, err error) {
+	if cmd.JSONOutput() {
+		cmd.PrintJSONError(w, err)
+		return
+	}
+	fang.DefaultErrorHandler(w, styles, err)
 }
 
 // isCobraUsageError detects errors that Cobra emits for wrong argument counts,

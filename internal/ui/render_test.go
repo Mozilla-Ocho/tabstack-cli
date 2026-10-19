@@ -297,3 +297,11 @@ func TestPrintMarkdownJSON(t *testing.T) {
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
+
+func TestPrintErrorJSONOmitsAPIFieldsForOtherErrors(t *testing.T) {
+	r, _, errBuf := newTestRenderer(ModeJSON)
+	r.PrintError(errStr("boom"))
+	if got := strings.TrimSpace(errBuf.String()); got != `{"error":"boom"}` {
+		t.Errorf("got %s", got)
+	}
+}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -129,6 +130,21 @@ func resolveMode() (ui.OutputMode, error) {
 	default:
 		return "", fmt.Errorf("invalid output format %q: must be one of: pretty, json", flagOutput)
 	}
+}
+
+// JSONOutput reports whether this invocation resolved to JSON output. main uses
+// it to print a failed command's error as a JSON object on stderr instead of
+// fang's styled block, so agents get the documented {"error": ...} shape. It is
+// safe to call after any failure, including flag parsing, since it only reads
+// the --output value (an invalid value counts as not JSON).
+func JSONOutput() bool {
+	mode, err := resolveMode()
+	return err == nil && mode == ui.ModeJSON
+}
+
+// PrintJSONError writes err to w as the JSON error object.
+func PrintJSONError(w io.Writer, err error) {
+	ui.Renderer{Err: w, Mode: ui.ModeJSON}.PrintError(err)
 }
 
 // newRenderer constructs the renderer from the resolved flags.
