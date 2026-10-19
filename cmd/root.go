@@ -189,11 +189,12 @@ func setupApp() error {
 
 // productClientOpts turns the persistent flags into product client options. It
 // is shared by every command that builds a product client, including `mcp`, so
-// timeout, retry, and debug behave the same everywhere.
+// timeout, retry, deprecation warnings, and debug behave the same everywhere.
 func productClientOpts(r ui.Renderer) []client.Option {
 	opts := []client.Option{
 		client.WithRetry(flagRetries, client.DefaultMaxRetryWait),
 		client.WithRetryNotify(retrySink(r)),
+		client.WithDeprecationNotify(deprecationSink(r)),
 	}
 	if flagTimeout > 0 {
 		opts = append(opts, client.WithTimeout(flagTimeout))

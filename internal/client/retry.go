@@ -135,6 +135,7 @@ func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) 
 		if err != nil {
 			return nil, err
 		}
+		c.deprecation.check(req, resp)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return resp, nil
 		}

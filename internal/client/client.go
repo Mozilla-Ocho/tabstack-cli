@@ -21,6 +21,8 @@ type Client struct {
 	baseURL string
 	http    *http.Client
 	retry   retryPolicy
+
+	deprecation *deprecationNotifier
 }
 
 // Option configures a Client.

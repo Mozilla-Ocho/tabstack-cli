@@ -133,3 +133,66 @@ func retryJSON(ri client.RetryInfo) string {
 	out, _ := json.Marshal(payload)
 	return string(out)
 }
+
+// deprecationSink warns on stderr when the API marks an endpoint deprecated or
+// schedules its sunset, so scripts and agents learn before it stops working.
+// Like retrySink it is always on, never touches stdout, and emits a JSON object
+// in JSON output mode. The client fires it at most once per endpoint.
+func deprecationSink(r ui.Renderer) func(client.Deprecation) {
+	return func(d client.Deprecation) {
+		if r.Mode == ui.ModeJSON {
+			fmt.Fprintln(r.Err, deprecationJSON(d))
+			return
+		}
+		fmt.Fprintf(r.Err, "%s %s\n", r.Styles.ErrorTag.Render("!"), deprecationLine(d))
+	}
+}
+
+// deprecationLine is the human-readable warning.
+func deprecationLine(d client.Deprecation) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s", d.Method, d.Endpoint)
+	switch {
+	case !d.Since.IsZero():
+		fmt.Fprintf(&b, " is deprecated (since %s)", d.Since.UTC().Format(time.DateOnly))
+	case d.Sunset.IsZero():
+		b.WriteString(" is deprecated")
+	}
+	if !d.Sunset.IsZero() {
+		if d.Since.IsZero() {
+			b.WriteString(" is scheduled for removal")
+		} else {
+			b.WriteString(" and is scheduled for removal")
+		}
+		fmt.Fprintf(&b, " on %s", d.Sunset.UTC().Format(time.DateOnly))
+	}
+	b.WriteString(". Upgrade tabstack, or check the API changelog")
+	if d.Link != "" {
+		b.WriteString(": " + d.Link)
+	}
+	return b.String()
+}
+
+// deprecationJSON is the machine-readable warning, one line.
+func deprecationJSON(d client.Deprecation) string {
+	payload := struct {
+		Deprecation struct {
+			Method   string `json:"method"`
+			Endpoint string `json:"endpoint"`
+			Since    string `json:"since,omitempty"`
+			Sunset   string `json:"sunset,omitempty"`
+			Link     string `json:"link,omitempty"`
+		} `json:"deprecation"`
+	}{}
+	payload.Deprecation.Method = d.Method
+	payload.Deprecation.Endpoint = d.Endpoint
+	if !d.Since.IsZero() {
+		payload.Deprecation.Since = d.Since.UTC().Format(time.RFC3339)
+	}
+	if !d.Sunset.IsZero() {
+		payload.Deprecation.Sunset = d.Sunset.UTC().Format(time.RFC3339)
+	}
+	payload.Deprecation.Link = d.Link
+	out, _ := json.Marshal(payload)
+	return string(out)
+}
