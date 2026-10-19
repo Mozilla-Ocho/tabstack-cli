@@ -50,7 +50,16 @@ This domain is for use in illustrative examples in documents...
 
 ## Install
 
-**macOS / Linux, quickest:**
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install mozilla-ocho/tap/tabstack
+```
+
+This also installs shell completions (bash, zsh, fish) and the man page.
+Upgrade with `brew upgrade tabstack`.
+
+**macOS / Linux, without Homebrew:**
 
 ```bash
 curl -fsSL https://tabstack.ai/install.sh | sh   # installs tabstack to /usr/local/bin

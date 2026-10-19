@@ -26,3 +26,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pushes Casks/tabstack.rb to Mozilla-Ocho/homebrew-tap. A
+          # fine-grained token with contents: write on that repo only.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

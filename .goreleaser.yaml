@@ -7,6 +7,8 @@ project_name: tabstack
 before:
   hooks:
     - go mod tidy
+    # Shell completions and the man page for the archives (and the cask).
+    - ./scripts/release-assets.sh
 
 builds:
   - id: tabstack
@@ -32,6 +34,11 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - completions/*
+      - manpages/*
 
 checksum:
   name_template: checksums.txt
@@ -48,3 +55,45 @@ changelog:
 release:
   draft: false
   prerelease: auto
+
+# Publishes Casks/tabstack.rb to Mozilla-Ocho/homebrew-tap on each release, so
+# `brew install mozilla-ocho/tap/tabstack` tracks the latest version. Needs the
+# HOMEBREW_TAP_TOKEN secret (contents: write on the tap repo); GITHUB_TOKEN
+# cannot push to another repository. Prereleases are skipped so the tap only
+# ever carries a stable version.
+homebrew_casks:
+  - name: tabstack
+    ids: [default]
+    binaries: [tabstack]
+    manpages: [manpages/tabstack.1.gz]
+    homepage: https://github.com/Mozilla-Ocho/tabstack-cli
+    description: Command-line client for the Tabstack AI API
+    license: MIT
+    directory: Casks
+    skip_upload: auto
+    commit_author:
+      name: tabstack-release-bot
+      email: tabstack-release-bot@users.noreply.github.com
+    commit_msg_template: "tabstack {{ .Tag }}"
+    repository:
+      owner: Mozilla-Ocho
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # Pre-generated at release time rather than generate_completions_from_
+    # executable: Homebrew 7's sandboxed cask installer SIGKILLs Go binaries
+    # run at install time (reproduced with a hello-world Go binary), so the
+    # completions would silently fail to install.
+    completions:
+      bash: completions/tabstack.bash
+      zsh: completions/tabstack.zsh
+      fish: completions/tabstack.fish
+    # The binaries are not signed or notarized, so Gatekeeper would quarantine
+    # them. Homebrew 7 wants declarative steps rather than a Ruby postflight
+    # block (which hooks.post.install would generate), hence custom_block.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{" }}staged_path{{ "}}" }}/tabstack"]
+        end
+      end

@@ -19,6 +19,8 @@ make help        # list all targets
 
 Version is injected via `-ldflags -X .../cmd.version=$(VERSION)`; `VERSION` comes from `git describe --tags --always --dirty`, falling back to `dev`.
 
+Releases: pushing a `v*` tag runs GoReleaser (`.github/workflows/release.yml`). Its before hook, `scripts/release-assets.sh`, generates bash/zsh/fish completions and a gzipped man page into the archives. `homebrew_casks` then pushes `Casks/tabstack.rb` to `Mozilla-Ocho/homebrew-tap` using the `HOMEBREW_TAP_TOKEN` secret, skipping prereleases. The cask links the pre-generated completions rather than using `generate_completions_from_executable`, because Homebrew 7's sandboxed cask installer SIGKILLs Go binaries run at install time. The cask clears the Gatekeeper quarantine with `postflight_steps` (a `custom_block`), because the binaries are not notarized. `help`, `completion`, `man`, and `__complete` skip the root pre-run (`isBuiltin` in `cmd/root.go`), so they need no key or readable config.
+
 Tests live alongside each package (`*_test.go`); GitHub Actions runs gofmt/vet/build/test on push and PRs (`.github/workflows/ci.yml`). `client.WithHTTPClient` injects a mock `*http.Client` for tests. `scripts/smoke-test.sh` (`make smoke`) exercises every command against the live API.
 
 ## Architecture

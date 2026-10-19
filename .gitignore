@@ -16,3 +16,5 @@ coverage.*
 *.swp
 .idea/
 .vscode/
+/manpages/
+/completions/
