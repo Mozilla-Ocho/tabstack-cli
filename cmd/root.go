@@ -72,6 +72,9 @@ func NewRootCmd() *cobra.Command {
 		// help, version) by checking an annotation, so `auth login` works before
 		// any credential exists.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if isBuiltin(cmd) {
+				return nil
+			}
 			if cmd.Annotations["skipClient"] == "true" {
 				return setupRendererOnly()
 			}
@@ -105,6 +108,31 @@ func NewRootCmd() *cobra.Command {
 	)
 
 	return root
+}
+
+// builtinCommands are the commands cobra and fang add on their own: help,
+// shell completion (the `completion` scripts and the hidden `__complete`
+// callbacks a shell makes on every tab), and the man page. They touch neither
+// the API nor the config, so they must run on a fresh install with no key, and
+// even with a config file that fails to load. The Homebrew cask generates
+// completions at install time, before any key exists.
+var builtinCommands = map[string]bool{
+	"help":                          true,
+	"completion":                    true,
+	"man":                           true,
+	cobra.ShellCompRequestCmd:       true,
+	cobra.ShellCompNoDescRequestCmd: true,
+}
+
+// isBuiltin reports whether cmd is, or sits under, one of builtinCommands
+// (e.g. `completion zsh`).
+func isBuiltin(cmd *cobra.Command) bool {
+	for c := cmd; c != nil && c.HasParent(); c = c.Parent() {
+		if builtinCommands[c.Name()] {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveMode decides the output mode. An explicit --output wins; otherwise we

@@ -3,6 +3,8 @@ package cmd
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
@@ -137,5 +139,51 @@ func TestNewRootCmdWiring(t *testing.T) {
 		if !sub[want] {
 			t.Errorf("root subcommand %q not registered", want)
 		}
+	}
+}
+
+func TestIsBuiltin(t *testing.T) {
+	root := NewRootCmd()
+	completion := &cobra.Command{Use: "completion"}
+	zsh := &cobra.Command{Use: "zsh"}
+	completion.AddCommand(zsh)
+	complete := &cobra.Command{Use: cobra.ShellCompRequestCmd}
+	man := &cobra.Command{Use: "man"}
+	root.AddCommand(completion, complete, man)
+
+	for _, c := range []*cobra.Command{completion, zsh, complete, man} {
+		if !isBuiltin(c) {
+			t.Errorf("isBuiltin(%q) = false, want true", c.CommandPath())
+		}
+	}
+	for _, args := range [][]string{{"extract", "markdown"}, {"auth", "login"}, {"schema", "list"}} {
+		c, _, err := root.Find(args)
+		if err != nil {
+			t.Fatalf("find %v: %v", args, err)
+		}
+		if isBuiltin(c) {
+			t.Errorf("isBuiltin(%q) = true, want false", c.CommandPath())
+		}
+	}
+	if isBuiltin(root) {
+		t.Error("isBuiltin(root) = true, want false")
+	}
+}
+
+func TestBuiltinsSkipPreRun(t *testing.T) {
+	isolate(t)
+	t.Setenv(config.EnvAPIKey, "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	root := NewRootCmd()
+	completion := &cobra.Command{Use: "completion", Run: func(*cobra.Command, []string) {}}
+	root.AddCommand(completion)
+	rootApp = nil
+	root.SetArgs([]string{"completion"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("completion without a key: %v", err)
+	}
+	if rootApp != nil {
+		t.Error("pre-run built the app context for a builtin command")
 	}
 }
