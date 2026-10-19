@@ -81,9 +81,9 @@ that hit the API exit `2` (non-retryable config error) with a clear message.
 | `--api-key <key>` | API key, overrides env + config. |
 | `--base-url <url>` | API root, overrides env + config. |
 | `--no-color` | Disable ANSI colour (also honours `NO_COLOR`). Irrelevant under `-o json`. |
-| `--timeout <dur>` | Timeout for **non-streaming** calls only, e.g. `30s`, `2m`. Ignored by `automate`/`research`. |
+| `--timeout <dur>` | Timeout for each **non-streaming** request attempt, e.g. `30s`, `2m`. Not a limit on the whole command: rate-limit retries each get a fresh timeout. Ignored by `automate`/`research`. |
 | `--org <org>` | Act as another stored organisation for this one call (id, name, or unique prefix). Never changes the saved default. |
-| `--max-retries <n>` | Retries for a `429` (or a `503` with `Retry-After`), default `2`; `0` disables. See [Rate limits](#rate-limits). |
+| `--max-retries <n>` | Retries for a `429` (or a `503` with `Retry-After`), default `2`; `0` disables. Each retry is a new attempt with its own `--timeout`. See [Rate limits](#rate-limits). |
 | `--debug` | Print trace id, timing, and rate-limit state for each API call to **stderr** (a JSON object under `-o json`). Quote the trace id in support requests. |
 
 ## Input value convention
@@ -260,6 +260,11 @@ rate-limit reset header, else 1s then 2s). Each retry prints a notice to
 ```json
 {"retry":{"status":429,"attempt":1,"max_retries":2,"wait_ms":3000}}
 ```
+
+`--timeout` applies to each attempt, not the whole command, so a rate-limited
+call can take up to `(max-retries + 1) × timeout` plus the retry waits (each at
+most 30s). To bound the total, set `--max-retries 0` and retry yourself, or wrap
+the command in your own deadline (e.g. `timeout 90 tabstack …`).
 
 The client does not block on a wait longer than 30s. When retries run out, or
 the wait is too long, the command exits `3` with `"status":429` on the JSON

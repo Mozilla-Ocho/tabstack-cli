@@ -433,7 +433,7 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--auth-url <url>` | Auth and management host URL |
 | `-o, --output pretty\|json` | Force an output mode (default: auto-detect) |
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
-| `--timeout <dur>` | Request timeout for non-streaming calls, e.g. `30s` |
+| `--timeout <dur>` | Timeout per request attempt for non-streaming calls, e.g. `30s` (retries each get their own) |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
 | `--max-retries <n>` | Retries for a rate-limited call, honouring `Retry-After` (default `2`, `0` disables) |
 

@@ -92,7 +92,7 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
-	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	pf.DurationVar(&flagTimeout, "timeout", 0, "timeout per request attempt for non-streaming calls (e.g. 30s); retries each get their own")
 	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
 	pf.IntVar(&flagRetries, "max-retries", client.DefaultMaxRetries, "retries for a rate-limited call (429, or 503 with Retry-After), honouring the server's wait; 0 disables")
 	// --key is the documented short form in the credential precedence; keep the
