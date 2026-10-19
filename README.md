@@ -453,6 +453,10 @@ times, with a notice on stderr for each retry. Waits longer than 30s are not
 blocked on: the command exits `3` and the error ends in `(retry after Ns)`.
 Streams are only retried before the first event.
 
+**Deprecations**: if the API marks an endpoint deprecated or schedules its
+removal (the `Deprecation` and `Sunset` headers), the CLI prints a one-time
+warning to stderr with the date and a link. The call itself still succeeds.
+
 ## Output & scripting
 
 Output is **pretty** (styled, human-readable) on a terminal and **JSON** when
@@ -464,7 +468,12 @@ tabstack extract markdown https://example.com | jq .
 
 Force a mode with `-o/--output pretty|json`, or disable colour with `--no-color`
 (or the `NO_COLOR` env var). Streaming commands (`automate`, `research`) emit one
-NDJSON line per event in JSON mode.
+NDJSON line per event in JSON mode. In JSON mode errors and other diagnostics
+on stderr are JSON objects too (`{"error": "..."}`), so both streams parse.
+
+The command names, flags, exit codes, and JSON shapes the CLI produces are
+stable within a major version; see [AGENTS.md](AGENTS.md#stability) for exactly
+what is covered.
 
 > **Note:** streaming events are parsed with a 4&nbsp;MB per-event buffer. A
 > single event whose payload exceeds that (e.g. an extremely large extracted

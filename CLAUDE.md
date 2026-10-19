@@ -111,9 +111,15 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 `cmd/auth.go`'s `classifyConsoleError` is the auth-host counterpart: an expired or missing session is a configuration problem (2), a rejected management request is an API error (`console.APIError`, 3), anything else falls through to `classifyError`.
 
+### Deprecation warnings
+
+`internal/client/deprecation.go`: `Client.send` passes every product response to `ParseDeprecation`, which reads `Deprecation` (RFC 9745 `@unix`, plus the older `true`/HTTP-date forms), `Sunset` (RFC 8594), and a `Link` with `rel="deprecation"`/`"sunset"`. `WithDeprecationNotify` fires at most once per method+path per `Client` (mutex-guarded, since `mcp` runs tools concurrently). `cmd/debug.go`'s `deprecationSink` prints it to stderr, always on.
+
 ### Output modes
 
 `resolveMode` (root.go): `--output pretty|json` wins; otherwise **pretty on a TTY, JSON when piped**, so `tabstack ... | jq` works without a flag. JSON streams emit NDJSON (one line per event). The renderer never reshapes caller-defined schema results.
+
+Under JSON mode every stderr line a product command writes is a JSON object with one top-level key (`error`, `retry`, `deprecation`, `acting_org`, `debug`), documented in AGENTS.md's stderr table, which is a stability promise (AGENTS.md "Stability"). Errors get there through `fang.WithErrorHandler` in `cmd/tabstack/main.go`: when `cmd.JSONOutput()` is true it calls `cmd.PrintJSONError` (`ui.Renderer.PrintError`, which adds `status`/`retry_after_seconds` for a `client.APIError`), otherwise `fang.DefaultErrorHandler`. A new stderr line in a product command must follow the same rule.
 
 ### Input ergonomics
 
