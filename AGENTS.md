@@ -1,8 +1,12 @@
 # Using `tabstack` from an AI agent
 
-This document tells an LLM agent how to drive the `tabstack` CLI correctly. It is
-a reference, not a tutorial: every command, flag, input format, output shape,
-and failure mode is listed so you can call the tool without guessing.
+This document tells an LLM agent when to reach for the `tabstack` CLI and how to
+drive it correctly. It is a reference, not a tutorial: every command, flag,
+input format, output shape, and failure mode is listed so you can call the tool
+without guessing.
+
+The installed binary carries this same document: run `tabstack agent-guide` to
+print the copy that matches its version.
 
 ## TL;DR for agents
 
@@ -17,6 +21,43 @@ and failure mode is listed so you can call the tool without guessing.
   calling; malformed schemas fail locally with exit `2`.
 - `automate` and `research` **stream**. In `-o json` they emit **NDJSON** (one
   JSON object per line); read line by line, do not `JSON.parse` the whole output.
+- Rate limits are **handled for you**: a `429` is retried after the server's
+  `Retry-After` (up to `--max-retries`, default 2). If it still fails, the error
+  ends in `(retry after Ns)`; wait that long before calling again.
+
+## When to use tabstack
+
+Use it when a task needs the **live content of a web page** turned into
+something a program can use, or a **browser** to act on a site.
+
+| You need to… | Use |
+|--------------|-----|
+| Read a page as text: docs, an article, a README | `extract markdown <url>` |
+| Pull specific fields from a page into a fixed shape (prices, listings, specs) | `extract json <url> --schema …` |
+| Fields that need judgement, not just copying (summaries, classification, normalisation) | `generate json <url> --instructions … --schema …` |
+| Answer a question that spans several sources, with citations | `agent research <query>` |
+| Click, type, log in, paginate, or fill a form on a site | `agent automate <task> --url …` |
+| A ready-made schema for a common page type (job postings, products, …) | `schema list`, then `schema pull <name>` and `--schema-name <name>` |
+
+Prefer the cheapest tool that answers the question: `extract markdown` before
+`generate json`, and both before `agent automate`. Automation drives a real
+browser, so it is the slowest and most expensive option.
+
+Do **not** use it for:
+
+- Content you already have or can read locally (files, a cloned repo).
+- A public JSON API you can call directly; fetching it through a browser adds
+  cost and nothing else.
+- Tasks that depend on *your user's own* browser state (their logged-in
+  sessions, extensions, local files); `automate` drives a remote browser, not
+  theirs.
+
+**CLI or MCP?** If your host speaks the Model Context Protocol (Claude Desktop,
+an IDE, an agent framework), `tabstack mcp` exposes the same capabilities as
+tools (`extract_markdown`, `extract_json`, `generate_json`, `automate`,
+`research`, `schema_list`, `schema_resolve`) with streamed progress, and is
+usually simpler than shelling out. Use the CLI when you only have a shell, or
+need to pipe results through other commands.
 
 ## Setup
 
@@ -39,6 +80,9 @@ that hit the API exit `2` (non-retryable config error) with a clear message.
 | `--base-url <url>` | API root, overrides env + config. |
 | `--no-color` | Disable ANSI colour (also honours `NO_COLOR`). Irrelevant under `-o json`. |
 | `--timeout <dur>` | Timeout for **non-streaming** calls only, e.g. `30s`, `2m`. Ignored by `automate`/`research`. |
+| `--org <org>` | Act as another stored organisation for this one call (id, name, or unique prefix). Never changes the saved default. |
+| `--max-retries <n>` | Retries for a `429` (or a `503` with `Retry-After`), default `2`; `0` disables. See [Rate limits](#rate-limits). |
+| `--debug` | Print trace id, timing, and rate-limit state for each API call to **stderr** (a JSON object under `-o json`). Quote the trace id in support requests. |
 
 ## Input value convention
 
@@ -81,7 +125,9 @@ Non-streaming. **The response is exactly your schema's shape**, returned verbati
 
 | Flag | Required | Notes |
 |------|----------|-------|
-| `--schema` | **yes** | JSON schema (literal / `@file` / `-`). Must be valid JSON. |
+| `--schema` | one of | JSON schema (literal / `@file` / `-`). Must be valid JSON. |
+| `--schema-name <name>` | one of | A schema pulled with `schema pull`, by bare name or repo path. Mutually exclusive with `--schema`. |
+| `--storage <dir>` | no | Schema store to read `--schema-name` from (default: the config dir). |
 | `--effort` / `--geo` / `--nocache` | no | As above. |
 
 Example:
@@ -98,7 +144,7 @@ instructions into the schema shape. Response is your schema's shape, verbatim.
 | Flag | Required | Notes |
 |------|----------|-------|
 | `--instructions` | **yes** | Transform prompt (literal / `@file` / `-`). Max **20,000** chars (validated locally). |
-| `--schema` | **yes** | Output JSON schema (literal / `@file` / `-`). |
+| `--schema` / `--schema-name` | **one of** | Output JSON schema, inline or pulled. Same rules as `extract json`. |
 | `--effort` / `--geo` / `--nocache` | no | As above. |
 
 Constraint: `--instructions` and `--schema` cannot **both** read from `-` (stdin)
@@ -180,13 +226,47 @@ should pass `--mode balanced` and null-guard `citedPages` before reading it.
 tabstack -o json agent research "latest developments in quantum computing" --mode balanced
 ```
 
+### `schema list` / `schema pull`: ready-made extraction schemas
+
+The public schema library has schemas for common page types. `schema list`
+shows them (`--local` for only the pulled ones); `schema pull <name>` saves one
+locally so `extract json` and `generate json` can use it via `--schema-name`.
+These commands need no API key.
+
+```bash
+tabstack -o json schema list
+tabstack schema pull job-posting
+tabstack -o json extract json https://example.com/careers/123 --schema-name job-posting
+```
+
 ### `auth login` / `auth status`
 
-- `auth login`: interactive (prompts for a hidden key) unless `--key <key>` is
-  passed; saves to the config file. **Agents should prefer `TABSTACK_API_KEY`**
-  and skip this entirely.
-- `auth status`: reports whether a key is configured and its source; never
-  prints the key. Works without a key present.
+- `auth login`: opens a browser for an OAuth sign-in, then sets up an API key.
+  It needs a human at a browser, so **agents should use `TABSTACK_API_KEY`**
+  and skip it.
+- `auth status`: reports who is signed in, the active organisation, and which
+  key is in play and where it came from; never prints the key. Works without a
+  key present.
+
+## Rate limits
+
+A `429 Too Many Requests` (or a `503` that carries `Retry-After`) is retried
+automatically, after the wait the server asks for (`Retry-After`, else the
+rate-limit reset header, else 1s then 2s). Each retry prints a notice to
+**stderr**, never stdout:
+
+```json
+{"retry":{"status":429,"attempt":1,"max_retries":2,"wait_ms":3000}}
+```
+
+The client does not block on a wait longer than 30s. When retries run out, or
+the wait is too long, the command exits `3` with an error ending in
+`(retry after Ns)` when the server named a wait. Sleep that long, then retry the
+same command unchanged; this is the one exit `3` that is not fixed by changing
+the request. Pass `--debug` to see the remaining quota on every call.
+
+Streams are only retried before they start. Once events are flowing, a failure
+is reported in-band and the run is not replayed.
 
 ## Effort levels (`extract`, `generate`)
 
@@ -206,7 +286,7 @@ most expensive.
 | `0` | success | proceed |
 | `1` | runtime / network error | retry with backoff; check connectivity, timeout. |
 | `2` | usage / invalid input or missing config | **fix the command**: bad flag, missing required arg, malformed JSON, out-of-range value, or no API key configured. Do not retry unchanged. |
-| `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. |
+| `3` | API error or in-band task failure | inspect the error message / failed event; the request reached the API but was rejected or the task failed. Adjust the request (URL, task wording, schema) before retrying. **Exception:** a `429` error (message ends in `retry after Ns`) means wait, then retry unchanged. |
 
 Errors in `-o json` mode are written to **stderr** as `{"error":"<message>"}`.
 

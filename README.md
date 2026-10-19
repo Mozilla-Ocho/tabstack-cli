@@ -245,6 +245,7 @@ it cannot leave you with nothing that works. `--force` overrides that.
 | `tabstack config path` | Print the config file path |
 | `tabstack config drop-legacy-key` | Remove a pre-organisation API key once an org key is in place |
 | `tabstack mcp` | Run a local MCP server exposing Tabstack tools over stdio |
+| `tabstack agent-guide` | Print the guide for driving tabstack from an AI agent |
 
 Run `tabstack <command> --help` for the full flag list on any command.
 
@@ -434,6 +435,7 @@ echo '{"type":"object"}' | tabstack extract json https://example.com --schema -
 | `--no-color` | Disable coloured output (or set `NO_COLOR`) |
 | `--timeout <dur>` | Request timeout for non-streaming calls, e.g. `30s` |
 | `--debug` | Print request id, timing, and rate-limit headers to stderr per API call |
+| `--max-retries <n>` | Retries for a rate-limited call, honouring `Retry-After` (default `2`, `0` disables) |
 
 **`--debug`**: for each API call, print a line to **stderr** (so it never
 touches piped stdout) with the HTTP status, elapsed time to first byte, the
@@ -444,6 +446,12 @@ budget. In `--output json` mode the line is a JSON object instead.
 $ tabstack extract markdown https://example.com --debug
 debug POST 200 359ms  trace=e1923436412e811be9fe229131cb0694  ratelimit=999/1000 (resets in 20s)
 ```
+
+**Rate limits**: a `429 Too Many Requests` (or a `503` with `Retry-After`) is
+retried automatically after the wait the server asks for, up to `--max-retries`
+times, with a notice on stderr for each retry. Waits longer than 30s are not
+blocked on: the command exits `3` and the error ends in `(retry after Ns)`.
+Streams are only retried before the first event.
 
 ## Output & scripting
 
@@ -489,8 +497,15 @@ fi
 
 `tabstack` is designed to be driven by LLM agents as well as humans. If you're
 wiring it into an agent (Claude Code, a custom harness, etc.), point the agent at
-[AGENTS.md](AGENTS.md). It documents every command, flag, and exit code in a
-form tuned for machine consumption.
+[AGENTS.md](AGENTS.md). It covers when to use each command, and documents every
+flag, output shape, and exit code in a form tuned for machine consumption.
+
+The same guide is embedded in the binary, so an agent with only `tabstack` on
+its `PATH` can read the version that matches what is installed:
+
+```bash
+tabstack agent-guide
+```
 
 ## Development
 

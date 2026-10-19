@@ -133,7 +133,7 @@ func TestNewRootCmdWiring(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
 		sub[c.Name()] = true
 	}
-	for _, want := range []string{"agent", "extract", "generate", "schema", "auth"} {
+	for _, want := range []string{"agent", "extract", "generate", "schema", "auth", "agent-guide"} {
 		if !sub[want] {
 			t.Errorf("root subcommand %q not registered", want)
 		}
