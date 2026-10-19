@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -195,12 +196,22 @@ func setupApp() error {
 	// stderr so it shows up in logs and terminals without contaminating piped
 	// stdout.
 	if base.orgOverride != "" {
-		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s)\n",
-			base.cfg.OrgName(base.orgOverride), base.orgOverride)
+		printActingOrg(base.renderer, base.orgOverride, base.cfg.OrgName(base.orgOverride))
 	}
 
 	rootApp = base
 	return nil
+}
+
+// printActingOrg notes the --org override on stderr: a line in pretty mode, a
+// JSON object in JSON mode, so every stderr line under JSON output parses.
+func printActingOrg(r ui.Renderer, id, name string) {
+	if r.Mode == ui.ModeJSON {
+		line, _ := json.Marshal(map[string]map[string]string{"acting_org": {"id": id, "name": name}})
+		fmt.Fprintln(r.Err, string(line))
+		return
+	}
+	fmt.Fprintf(r.Err, "acting as organisation %s (%s)\n", name, id)
 }
 
 // productClientOpts turns the persistent flags into product client options. It

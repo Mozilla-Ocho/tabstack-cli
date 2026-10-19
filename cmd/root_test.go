@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,5 +168,18 @@ func TestPrintJSONErrorRateLimited(t *testing.T) {
 	}
 	if got.Status != 429 || got.RetryAfterSeconds != 12 || got.Error != "api error (429): slow down (retry after 12s)" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestPrintActingOrg(t *testing.T) {
+	var buf bytes.Buffer
+	printActingOrg(ui.Renderer{Err: &buf, Mode: ui.ModeJSON}, "org_1", "Acme")
+	if got := strings.TrimSpace(buf.String()); got != `{"acting_org":{"id":"org_1","name":"Acme"}}` {
+		t.Errorf("json = %s", got)
+	}
+	buf.Reset()
+	printActingOrg(ui.Renderer{Err: &buf, Mode: ui.ModePretty}, "org_1", "Acme")
+	if got := buf.String(); got != "acting as organisation Acme (org_1)\n" {
+		t.Errorf("pretty = %q", got)
 	}
 }
