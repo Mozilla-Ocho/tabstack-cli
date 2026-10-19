@@ -484,14 +484,17 @@ These make the CLI scriptable: branch on the exit status to tell a bad request
 from a network failure from an API rejection:
 
 ```bash
-if ! tabstack extract markdown "$url" > out.md; then
-  case $? in
-    2) echo "check your arguments" ;;
-    3) echo "the API rejected the request" ;;
-    *) echo "network or runtime error" ;;
-  esac
-fi
+tabstack extract markdown "$url" > out.md
+case $? in
+  0) ;;
+  2) echo "check your arguments" ;;
+  3) echo "the API rejected the request" ;;
+  *) echo "network or runtime error" ;;
+esac
 ```
+
+(Capture the status directly: inside `if ! cmd; then`, `$?` is the negated
+result and always `0`.)
 
 ## Using tabstack with AI agents
 
