@@ -92,3 +92,86 @@ func TestDebugLineOmitsAbsentFields(t *testing.T) {
 		t.Errorf("line missing elapsed:\n%s", line)
 	}
 }
+
+func TestRetryLine(t *testing.T) {
+	got := retryLine(client.RetryInfo{Attempt: 1, MaxRetries: 2, Status: 429, Wait: 3 * time.Second})
+	if want := "429 too many requests, retrying in 3s (1/2)"; got != want {
+		t.Errorf("retryLine = %q, want %q", got, want)
+	}
+}
+
+func TestRetrySinkJSONToStderr(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	r := ui.Renderer{Out: &out, Err: &errBuf, Mode: ui.ModeJSON, Styles: ui.NewStyles(true)}
+	retrySink(r)(client.RetryInfo{Attempt: 2, MaxRetries: 2, Status: 503, Wait: 1500 * time.Millisecond})
+
+	if out.Len() != 0 {
+		t.Errorf("retry notice leaked to stdout: %q", out.String())
+	}
+	var got struct {
+		Retry struct {
+			Status     int   `json:"status"`
+			Attempt    int   `json:"attempt"`
+			MaxRetries int   `json:"max_retries"`
+			WaitMS     int64 `json:"wait_ms"`
+		} `json:"retry"`
+	}
+	if err := json.Unmarshal(errBuf.Bytes(), &got); err != nil {
+		t.Fatalf("stderr not JSON: %v: %q", err, errBuf.String())
+	}
+	if got.Retry.Status != 503 || got.Retry.Attempt != 2 || got.Retry.MaxRetries != 2 || got.Retry.WaitMS != 1500 {
+		t.Errorf("retry = %+v", got.Retry)
+	}
+}
+
+func TestDeprecationLine(t *testing.T) {
+	since := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	sunset := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		d    client.Deprecation
+		want string
+	}{
+		{
+			client.Deprecation{Method: "POST", Endpoint: "/v1/extract/json", Since: since, Sunset: sunset, Link: "https://docs.example/dep"},
+			"POST /v1/extract/json is deprecated (since 2026-01-01) and is scheduled for removal on 2027-01-01. Upgrade tabstack, or check the API changelog: https://docs.example/dep",
+		},
+		{
+			client.Deprecation{Method: "POST", Endpoint: "/v1/research"},
+			"POST /v1/research is deprecated. Upgrade tabstack, or check the API changelog",
+		},
+		{
+			client.Deprecation{Method: "POST", Endpoint: "/v1/automate", Sunset: sunset},
+			"POST /v1/automate is scheduled for removal on 2027-01-01. Upgrade tabstack, or check the API changelog",
+		},
+	}
+	for _, tc := range cases {
+		if got := deprecationLine(tc.d); got != tc.want {
+			t.Errorf("deprecationLine =\n%q\nwant\n%q", got, tc.want)
+		}
+	}
+}
+
+func TestDeprecationSinkJSONToStderr(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	r := ui.Renderer{Out: &out, Err: &errBuf, Mode: ui.ModeJSON, Styles: ui.NewStyles(true)}
+	deprecationSink(r)(client.Deprecation{
+		Method: "POST", Endpoint: "/v1/extract/json",
+		Sunset: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if out.Len() != 0 {
+		t.Errorf("warning leaked to stdout: %q", out.String())
+	}
+	var got struct {
+		Deprecation struct {
+			Endpoint string `json:"endpoint"`
+			Since    string `json:"since"`
+			Sunset   string `json:"sunset"`
+		} `json:"deprecation"`
+	}
+	if err := json.Unmarshal(errBuf.Bytes(), &got); err != nil {
+		t.Fatalf("stderr not JSON: %v: %q", err, errBuf.String())
+	}
+	if got.Deprecation.Endpoint != "/v1/extract/json" || got.Deprecation.Sunset != "2027-01-01T00:00:00Z" || got.Deprecation.Since != "" {
+		t.Errorf("deprecation = %+v", got.Deprecation)
+	}
+}

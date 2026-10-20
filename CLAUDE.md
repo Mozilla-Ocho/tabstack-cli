@@ -68,11 +68,13 @@ The client splits on transport, not endpoint:
 - **`doJSON`**: single JSON request/response. Used by `extract/json`, `extract/markdown`, `generate/json`, `automate/{id}/input`. Schema-driven endpoints (`extract/json`, `generate/json`) return `json.RawMessage` verbatim because the response shape is caller-defined by the supplied JSON schema.
 - **`doStream`**: Server-Sent Events. Used by `automate` and `research`. Deliberately imposes **no** client timeout (a hard timeout would cut the stream); cancellation flows through `context`. `--timeout` only affects non-streaming calls.
 
+**Rate-limit retries** (`internal/client/retry.go`): both styles go through `Client.send`, which retries a 429 always and a 503 only when it carries `Retry-After` (every endpoint is a POST and `automate` has side effects, so only responses where the server said the request was not processed qualify; other 5xx and network errors are never retried). The wait is `Retry-After` → rate-limit reset (`ParseRateLimit`) → 1s/2s/4s backoff. `WithRetry(max, maxWait)` sets the budget (`--max-retries`, default 2; `DefaultMaxRetryWait` 30s): a longer wait is not blocked on, and the final `APIError` carries `RetryAfter` (only a server-provided wait, never the local backoff) so the message ends in `(retry after Ns)`. For streams only the initial response is retried. `WithRetryNotify` feeds `cmd/debug.go`'s `retrySink`, which always (not only with `--debug`) writes a notice to stderr. `cmd/root.go`'s `productClientOpts` builds timeout/retry/debug options for every product client, including `mcp`'s.
+
 `internal/client/sse.go` (`ParseSSE`) is a from-scratch SSE parser with a 4MB scanner buffer (extracted page content exceeds the default 64KB token limit).
 
 ### Debug flag
 
-`--debug` (root, persistent) surfaces per-call diagnostics. `client.WithDebug(sink)` (`internal/client/debug.go`) wraps the http transport with a `debugTransport` that times each `RoundTrip` (request → response headers, i.e. server latency / time-to-first-byte, which is also the only meaningful timing for a long-lived stream) and reads the `x-trace-id` and `x-ratelimit-*` response headers into a `DebugInfo`. It composes over `WithHTTPClient`/`WithTimeout` and touches no bodies or credentials. `cmd/debug.go`'s `debugSink` renders each `DebugInfo` to **stderr** (never stdout, so piping and NDJSON stay clean): a compact line in pretty mode, a JSON object under `--output json`. Only product-host calls are instrumented; the `client` package stays free of any `ui` dependency (the sink is a plain `func(DebugInfo)`).
+`--debug` (root, persistent) surfaces per-call diagnostics. `client.WithDebug(sink)` (`internal/client/debug.go`) wraps the http transport with a `debugTransport` that times each `RoundTrip` (request → response headers, i.e. server latency / time-to-first-byte, which is also the only meaningful timing for a long-lived stream) and reads the `x-trace-id` header and rate-limit state into a `DebugInfo`. Rate limits come from `ParseRateLimit` (`internal/client/ratelimit.go`), which accepts the IETF structured `RateLimit`/`RateLimit-Policy` fields, the earlier `RateLimit-*` draft headers, and `X-RateLimit-*` (reset as unix seconds, or a delta when below 1e9), per field in that order, so `--debug` survives the API changing header shape. It composes over `WithHTTPClient`/`WithTimeout` and touches no bodies or credentials. `cmd/debug.go`'s `debugSink` renders each `DebugInfo` to **stderr** (never stdout, so piping and NDJSON stay clean): a compact line in pretty mode, a JSON object under `--output json`. Only product-host calls are instrumented; the `client` package stays free of any `ui` dependency (the sink is a plain `func(DebugInfo)`).
 
 ### Schema pull (third transport)
 
@@ -96,6 +98,10 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 **stdio invariant**: stdout carries JSON-RPC frames only. `internal/mcp` must never write to stdout; all diagnostics go to stderr, and there is no interactive prompt. The command carries the `skipClient` annotation so the pre-run builds no product client and does not require a key up front. `cmd/mcp.go`'s `resolveMCPKey` resolves the product key like every other command but tolerates a missing one: with a session and an active org it mints a key non-interactively (`CreateAPIKey`) and stores it, so the next start skips that; with no key and no session it exits 2 with `auth login` guidance. Management tools use the session (auto-refresh + rotation); product tools use the resolved API key — the host/credential split is preserved. A closed stdin or a signal is a clean shutdown (`isCleanShutdown`), not a failure exit.
 
+### Agent guide
+
+`AGENTS.md` is the agent-facing reference (when to use each command, flags, output shapes, rate limits, exit codes). It is embedded in the binary by the root-level package `tabstack` (`guide.go`, since `go:embed` cannot reach outside a package's directory) and printed verbatim by `tabstack agent-guide` (`cmd/guide.go`, `skipClient`, raw Markdown in every output mode). The root command's help points agents at it. Any change to commands or flags should update `AGENTS.md` too, since it ships in the binary.
+
 ### Exit codes (scriptability)
 
 `cmd/helpers.go` defines `exitErr{code, err}` and `classifyError`:
@@ -105,9 +111,15 @@ Tools: `extract_markdown`, `extract_json`, `generate_json` (request/response); `
 
 `cmd/auth.go`'s `classifyConsoleError` is the auth-host counterpart: an expired or missing session is a configuration problem (2), a rejected management request is an API error (`console.APIError`, 3), anything else falls through to `classifyError`.
 
+### Deprecation warnings
+
+`internal/client/deprecation.go`: `Client.send` passes every product response to `ParseDeprecation`, which reads `Deprecation` (RFC 9745 `@unix`, plus the older `true`/HTTP-date forms), `Sunset` (RFC 8594), and a `Link` with `rel="deprecation"`/`"sunset"`. `WithDeprecationNotify` fires at most once per method+path per `Client` (mutex-guarded, since `mcp` runs tools concurrently). `cmd/debug.go`'s `deprecationSink` prints it to stderr, always on.
+
 ### Output modes
 
 `resolveMode` (root.go): `--output pretty|json` wins; otherwise **pretty on a TTY, JSON when piped**, so `tabstack ... | jq` works without a flag. JSON streams emit NDJSON (one line per event). The renderer never reshapes caller-defined schema results.
+
+Under JSON mode every stderr line a product command writes is a JSON object with one top-level key (`error`, `retry`, `deprecation`, `acting_org`, `debug`), documented in AGENTS.md's stderr table, which is a stability promise (AGENTS.md "Stability"). Errors get there through `fang.WithErrorHandler` in `cmd/tabstack/main.go`: when `cmd.JSONOutput()` is true it calls `cmd.PrintJSONError` (`ui.Renderer.PrintError`, which adds `status`/`retry_after_seconds` for a `client.APIError`), otherwise `fang.DefaultErrorHandler`. A new stderr line in a product command must follow the same rule.
 
 ### Input ergonomics
 

@@ -2,7 +2,6 @@ package client
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -17,9 +16,11 @@ type DebugInfo struct {
 	Elapsed time.Duration // request sent -> response headers received
 	TraceID string        // x-trace-id, the id to quote in a support request
 
-	RateLimitLimit     string    // x-ratelimit-limit
-	RateLimitRemaining string    // x-ratelimit-remaining
-	RateLimitReset     time.Time // x-ratelimit-reset, parsed from unix seconds; zero if absent
+	// Rate-limit state from whichever header shape the server sent; see
+	// ParseRateLimit. RateLimitReset is zero when absent.
+	RateLimitLimit     string
+	RateLimitRemaining string
+	RateLimitReset     time.Time
 }
 
 // WithDebug wraps the client's transport so each round trip is timed and its
@@ -53,21 +54,19 @@ type debugTransport struct {
 func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := t.now()
 	resp, err := t.base.RoundTrip(req)
+	end := t.now()
 	info := DebugInfo{
 		Method:  req.Method,
 		URL:     req.URL.String(),
-		Elapsed: t.now().Sub(start),
+		Elapsed: end.Sub(start),
 	}
 	if resp != nil {
 		info.Status = resp.StatusCode
 		info.TraceID = resp.Header.Get("X-Trace-Id")
-		info.RateLimitLimit = resp.Header.Get("X-RateLimit-Limit")
-		info.RateLimitRemaining = resp.Header.Get("X-RateLimit-Remaining")
-		if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
-			if secs, perr := strconv.ParseInt(reset, 10, 64); perr == nil {
-				info.RateLimitReset = time.Unix(secs, 0)
-			}
-		}
+		rl := ParseRateLimit(resp.Header, end)
+		info.RateLimitLimit = rl.Limit
+		info.RateLimitRemaining = rl.Remaining
+		info.RateLimitReset = rl.Reset
 	}
 	t.sink(info)
 	return resp, err

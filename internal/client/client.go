@@ -20,6 +20,9 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	retry   retryPolicy
+
+	deprecation *deprecationNotifier
 }
 
 // Option configures a Client.
@@ -44,6 +47,12 @@ func New(apiKey, baseURL string, opts ...Option) *Client {
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		http:    &http.Client{},
+		retry: retryPolicy{
+			maxRetries: DefaultMaxRetries,
+			maxWait:    DefaultMaxRetryWait,
+			sleep:      sleepCtx,
+			now:        time.Now,
+		},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -56,13 +65,24 @@ func New(apiKey, baseURL string, opts ...Option) *Client {
 type APIError struct {
 	StatusCode int
 	Message    string
+
+	// RetryAfter is the wait the server asked for on a rate-limited (429) or
+	// unavailable (503) response, zero when it gave none. It is set once the
+	// client's own retries are spent or the wait exceeded what it will block on.
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
+	var msg string
 	if e.Message != "" {
-		return fmt.Sprintf("api error (%d): %s", e.StatusCode, e.Message)
+		msg = fmt.Sprintf("api error (%d): %s", e.StatusCode, e.Message)
+	} else {
+		msg = fmt.Sprintf("api error: status %d", e.StatusCode)
 	}
-	return fmt.Sprintf("api error: status %d", e.StatusCode)
+	if e.RetryAfter > 0 {
+		msg += fmt.Sprintf(" (retry after %s)", e.RetryAfter.Round(time.Second))
+	}
+	return msg
 }
 
 // newRequest builds a POST request to path with body marshalled as JSON.
@@ -88,21 +108,18 @@ func (c *Client) newRequest(ctx context.Context, path string, body any) (*http.R
 // doJSON sends a request expecting a single JSON response, decoding it into out.
 // It is used by the non-streaming endpoints (extract, generate, input).
 func (c *Client) doJSON(ctx context.Context, path string, body, out any) error {
-	req, err := c.newRequest(ctx, path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.http.Do(req)
+	resp, err := c.send(ctx, func() (*http.Request, error) {
+		req, err := c.newRequest(ctx, path, body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeError(resp)
-	}
 
 	if out == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -116,22 +133,21 @@ func (c *Client) doJSON(ctx context.Context, path string, body, out any) error {
 
 // doStream sends a request expecting an SSE stream, invoking fn for each event.
 // It does not impose a client-level timeout, cancellation flows through ctx.
+// Retries only cover the initial response: once the stream has started, a
+// failure is reported in-band and never replayed.
 func (c *Client) doStream(ctx context.Context, path string, body any, fn func(Event) error) error {
-	req, err := c.newRequest(ctx, path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.http.Do(req)
+	resp, err := c.send(ctx, func() (*http.Request, error) {
+		req, err := c.newRequest(ctx, path, body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "text/event-stream")
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeError(resp)
-	}
 
 	return ParseSSE(resp.Body, fn)
 }
@@ -139,7 +155,7 @@ func (c *Client) doStream(ctx context.Context, path string, body any, fn func(Ev
 // decodeError reads an error response body and turns it into an *APIError. We
 // read the whole body first so a malformed JSON error still yields something
 // useful in the message.
-func decodeError(resp *http.Response) error {
+func decodeError(resp *http.Response) *APIError {
 	data, _ := io.ReadAll(resp.Body)
 
 	var payload struct {

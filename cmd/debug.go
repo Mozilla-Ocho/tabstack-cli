@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -93,4 +94,105 @@ func resetIn(reset time.Time, now func() time.Time) (string, bool) {
 	}
 	d := max(reset.Sub(now()).Round(time.Second), 0)
 	return d.String(), true
+}
+
+// retrySink reports each retry (429, or 503 with Retry-After) on stderr, so a call that pauses to
+// honour Retry-After says why instead of looking hung. Like debugSink it never
+// touches stdout, and in JSON output mode it emits a JSON object. It is always
+// on, not gated by --debug: a silent multi-second stall is worse than a line.
+func retrySink(r ui.Renderer) func(client.RetryInfo) {
+	return func(ri client.RetryInfo) {
+		if r.Mode == ui.ModeJSON {
+			fmt.Fprintln(r.Err, retryJSON(ri))
+			return
+		}
+		fmt.Fprintln(r.Err, r.Styles.Muted.Render(retryLine(ri)))
+	}
+}
+
+// retryLine is the human-readable retry notice.
+func retryLine(ri client.RetryInfo) string {
+	return fmt.Sprintf("%d %s, retrying in %s (%d/%d)",
+		ri.Status, strings.ToLower(http.StatusText(ri.Status)), ri.Wait.Round(time.Millisecond), ri.Attempt, ri.MaxRetries)
+}
+
+// retryJSON is the machine-readable retry notice, one line.
+func retryJSON(ri client.RetryInfo) string {
+	payload := struct {
+		Retry struct {
+			Status     int   `json:"status"`
+			Attempt    int   `json:"attempt"`
+			MaxRetries int   `json:"max_retries"`
+			WaitMS     int64 `json:"wait_ms"`
+		} `json:"retry"`
+	}{}
+	payload.Retry.Status = ri.Status
+	payload.Retry.Attempt = ri.Attempt
+	payload.Retry.MaxRetries = ri.MaxRetries
+	payload.Retry.WaitMS = ri.Wait.Milliseconds()
+	out, _ := json.Marshal(payload)
+	return string(out)
+}
+
+// deprecationSink warns on stderr when the API marks an endpoint deprecated or
+// schedules its sunset, so scripts and agents learn before it stops working.
+// Like retrySink it is always on, never touches stdout, and emits a JSON object
+// in JSON output mode. The client fires it at most once per endpoint.
+func deprecationSink(r ui.Renderer) func(client.Deprecation) {
+	return func(d client.Deprecation) {
+		if r.Mode == ui.ModeJSON {
+			fmt.Fprintln(r.Err, deprecationJSON(d))
+			return
+		}
+		fmt.Fprintf(r.Err, "%s %s\n", r.Styles.ErrorTag.Render("!"), deprecationLine(d))
+	}
+}
+
+// deprecationLine is the human-readable warning.
+func deprecationLine(d client.Deprecation) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s", d.Method, d.Endpoint)
+	switch {
+	case !d.Since.IsZero():
+		fmt.Fprintf(&b, " is deprecated (since %s)", d.Since.UTC().Format(time.DateOnly))
+	case d.Sunset.IsZero():
+		b.WriteString(" is deprecated")
+	}
+	if !d.Sunset.IsZero() {
+		if d.Since.IsZero() {
+			b.WriteString(" is scheduled for removal")
+		} else {
+			b.WriteString(" and is scheduled for removal")
+		}
+		fmt.Fprintf(&b, " on %s", d.Sunset.UTC().Format(time.DateOnly))
+	}
+	b.WriteString(". Upgrade tabstack, or check the API changelog")
+	if d.Link != "" {
+		b.WriteString(": " + d.Link)
+	}
+	return b.String()
+}
+
+// deprecationJSON is the machine-readable warning, one line.
+func deprecationJSON(d client.Deprecation) string {
+	payload := struct {
+		Deprecation struct {
+			Method   string `json:"method"`
+			Endpoint string `json:"endpoint"`
+			Since    string `json:"since,omitempty"`
+			Sunset   string `json:"sunset,omitempty"`
+			Link     string `json:"link,omitempty"`
+		} `json:"deprecation"`
+	}{}
+	payload.Deprecation.Method = d.Method
+	payload.Deprecation.Endpoint = d.Endpoint
+	if !d.Since.IsZero() {
+		payload.Deprecation.Since = d.Since.UTC().Format(time.RFC3339)
+	}
+	if !d.Sunset.IsZero() {
+		payload.Deprecation.Sunset = d.Sunset.UTC().Format(time.RFC3339)
+	}
+	payload.Deprecation.Link = d.Link
+	out, _ := json.Marshal(payload)
+	return string(out)
 }

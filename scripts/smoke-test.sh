@@ -87,7 +87,9 @@ if [ ! -x "$BIN" ]; then
 fi
 
 # Confirm a key resolves before spending time/credits.
-if ! "$BIN" auth status --no-color 2>&1 | grep -q "API key configured"; then
+# The env var always wins; otherwise `auth status` reports "api key: stored …"
+# when the active org (or a pre-organisation config) has a key.
+if [ -z "${TABSTACK_API_KEY:-}" ] && ! "$BIN" auth status --no-color 2>&1 | grep -q "^api key: stored"; then
   printf '%sNo API key configured.%s Set TABSTACK_API_KEY, pass --api-key, or run `tabstack auth login`.\n' "$c_red" "$c_off"
   exit 1
 fi

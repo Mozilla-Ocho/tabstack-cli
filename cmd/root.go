@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -48,6 +50,7 @@ var (
 	flagNoColor bool
 	flagTimeout time.Duration
 	flagDebug   bool
+	flagRetries int
 )
 
 // rootApp holds the constructed context for the current invocation.
@@ -63,7 +66,9 @@ func NewRootCmd() *cobra.Command {
 		Use:   "tabstack",
 		Short: "Command-line client for the Tabstack AI API",
 		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web " +
-			"research, and structured extraction and generation from any URL.",
+			"research, and structured extraction and generation from any URL.\n\n" +
+			"AI agents: run `tabstack agent-guide` for when to use each command, " +
+			"output shapes, and exit codes.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
@@ -87,8 +92,9 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&flagOrg, "org", "", "act as this organisation for one command (id, name, or unique prefix)")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: pretty|json (default: pretty on a TTY, json when piped)")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable coloured output")
-	pf.DurationVar(&flagTimeout, "timeout", 0, "request timeout for non-streaming calls (e.g. 30s)")
+	pf.DurationVar(&flagTimeout, "timeout", 0, "timeout per request attempt for non-streaming calls (e.g. 30s); retries each get their own")
 	pf.BoolVar(&flagDebug, "debug", false, "print request id, timing, and rate-limit headers to stderr for each API call")
+	pf.IntVar(&flagRetries, "max-retries", client.DefaultMaxRetries, "retries for a rate-limited call (429, or 503 with Retry-After), honouring the server's wait; 0 disables")
 	// --key is the documented short form in the credential precedence; keep the
 	// help output to one entry rather than two that mean the same thing.
 	_ = pf.MarkHidden("key")
@@ -102,6 +108,7 @@ func NewRootCmd() *cobra.Command {
 		newKeysCmd(),
 		newConfigCmd(),
 		newMCPCmd(),
+		newAgentGuideCmd(),
 	)
 
 	return root
@@ -124,6 +131,21 @@ func resolveMode() (ui.OutputMode, error) {
 	default:
 		return "", fmt.Errorf("invalid output format %q: must be one of: pretty, json", flagOutput)
 	}
+}
+
+// JSONOutput reports whether this invocation resolved to JSON output. main uses
+// it to print a failed command's error as a JSON object on stderr instead of
+// fang's styled block, so agents get the documented {"error": ...} shape. It is
+// safe to call after any failure, including flag parsing, since it only reads
+// the --output value (an invalid value counts as not JSON).
+func JSONOutput() bool {
+	mode, err := resolveMode()
+	return err == nil && mode == ui.ModeJSON
+}
+
+// PrintJSONError writes err to w as the JSON error object.
+func PrintJSONError(w io.Writer, err error) {
+	ui.Renderer{Err: w, Mode: ui.ModeJSON}.PrintError(err)
 }
 
 // newRenderer constructs the renderer from the resolved flags.
@@ -168,25 +190,46 @@ func setupApp() error {
 	}
 	base.key = res
 
-	var opts []client.Option
-	if flagTimeout > 0 {
-		opts = append(opts, client.WithTimeout(flagTimeout))
-	}
-	if flagDebug {
-		opts = append(opts, client.WithDebug(debugSink(base.renderer, nil)))
-	}
-	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), opts...)
+	base.client = client.New(res.APIKey, base.cfg.ResolveBaseURL(flagBaseURL), productClientOpts(base.renderer)...)
 
 	// When --org is in play, say which organisation we are acting as. It goes to
 	// stderr so it shows up in logs and terminals without contaminating piped
 	// stdout.
 	if base.orgOverride != "" {
-		fmt.Fprintf(base.renderer.Err, "acting as organisation %s (%s)\n",
-			base.cfg.OrgName(base.orgOverride), base.orgOverride)
+		printActingOrg(base.renderer, base.orgOverride, base.cfg.OrgName(base.orgOverride))
 	}
 
 	rootApp = base
 	return nil
+}
+
+// printActingOrg notes the --org override on stderr: a line in pretty mode, a
+// JSON object in JSON mode, so every stderr line under JSON output parses.
+func printActingOrg(r ui.Renderer, id, name string) {
+	if r.Mode == ui.ModeJSON {
+		line, _ := json.Marshal(map[string]map[string]string{"acting_org": {"id": id, "name": name}})
+		fmt.Fprintln(r.Err, string(line))
+		return
+	}
+	fmt.Fprintf(r.Err, "acting as organisation %s (%s)\n", name, id)
+}
+
+// productClientOpts turns the persistent flags into product client options. It
+// is shared by every command that builds a product client, including `mcp`, so
+// timeout, retry, deprecation warnings, and debug behave the same everywhere.
+func productClientOpts(r ui.Renderer) []client.Option {
+	opts := []client.Option{
+		client.WithRetry(flagRetries, client.DefaultMaxRetryWait),
+		client.WithRetryNotify(retrySink(r)),
+		client.WithDeprecationNotify(deprecationSink(r)),
+	}
+	if flagTimeout > 0 {
+		opts = append(opts, client.WithTimeout(flagTimeout))
+	}
+	if flagDebug {
+		opts = append(opts, client.WithDebug(debugSink(r, nil)))
+	}
+	return opts
 }
 
 // setupRendererOnly builds the renderer and loads config for commands that do

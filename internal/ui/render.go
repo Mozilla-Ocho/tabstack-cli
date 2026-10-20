@@ -3,10 +3,12 @@ package ui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 	"github.com/charmbracelet/lipgloss"
@@ -200,11 +202,20 @@ func isLongAnswer(text string) bool {
 
 // PrintError writes an error to stderr. Pretty mode tags it; JSON mode emits a
 // single {"error": "..."} object so failures stay parseable on the error stream.
+// An API error also carries its HTTP status, and a rate-limited one the
+// server's requested wait, so an agent can branch without parsing the message.
 func (r Renderer) PrintError(err error) {
 	if r.Mode == ModeJSON {
-		line, _ := json.Marshal(struct {
-			Error string `json:"error"`
-		}{Error: err.Error()})
+		payload := struct {
+			Error             string `json:"error"`
+			Status            int    `json:"status,omitempty"`
+			RetryAfterSeconds int64  `json:"retry_after_seconds,omitempty"`
+		}{Error: err.Error()}
+		if apiErr, ok := errors.AsType[*client.APIError](err); ok {
+			payload.Status = apiErr.StatusCode
+			payload.RetryAfterSeconds = int64(apiErr.RetryAfter.Round(time.Second) / time.Second)
+		}
+		line, _ := json.Marshal(payload)
 		fmt.Fprintln(r.Err, string(line))
 		return
 	}

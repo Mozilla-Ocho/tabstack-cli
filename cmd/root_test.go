@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Mozilla-Ocho/tabstack-cli/internal/client"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/config"
 	"github.com/Mozilla-Ocho/tabstack-cli/internal/ui"
 )
@@ -133,9 +138,48 @@ func TestNewRootCmdWiring(t *testing.T) {
 	for _, c := range NewRootCmd().Commands() {
 		sub[c.Name()] = true
 	}
-	for _, want := range []string{"agent", "extract", "generate", "schema", "auth"} {
+	for _, want := range []string{"agent", "extract", "generate", "schema", "auth", "agent-guide"} {
 		if !sub[want] {
 			t.Errorf("root subcommand %q not registered", want)
 		}
+	}
+}
+
+func TestJSONOutput(t *testing.T) {
+	isolate(t)
+	for flag, want := range map[string]bool{"json": true, "pretty": false, "bogus": false, "": true} {
+		flagOutput = flag
+		if got := JSONOutput(); got != want {
+			t.Errorf("JSONOutput() with --output %q = %v, want %v", flag, got, want)
+		}
+	}
+}
+
+func TestPrintJSONErrorRateLimited(t *testing.T) {
+	var buf bytes.Buffer
+	PrintJSONError(&buf, withCode(3, &client.APIError{StatusCode: 429, Message: "slow down", RetryAfter: 12 * time.Second}))
+	var got struct {
+		Error             string `json:"error"`
+		Status            int    `json:"status"`
+		RetryAfterSeconds int64  `json:"retry_after_seconds"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %v: %q", err, buf.String())
+	}
+	if got.Status != 429 || got.RetryAfterSeconds != 12 || got.Error != "api error (429): slow down (retry after 12s)" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestPrintActingOrg(t *testing.T) {
+	var buf bytes.Buffer
+	printActingOrg(ui.Renderer{Err: &buf, Mode: ui.ModeJSON}, "org_1", "Acme")
+	if got := strings.TrimSpace(buf.String()); got != `{"acting_org":{"id":"org_1","name":"Acme"}}` {
+		t.Errorf("json = %s", got)
+	}
+	buf.Reset()
+	printActingOrg(ui.Renderer{Err: &buf, Mode: ui.ModePretty}, "org_1", "Acme")
+	if got := buf.String(); got != "acting as organisation Acme (org_1)\n" {
+		t.Errorf("pretty = %q", got)
 	}
 }
