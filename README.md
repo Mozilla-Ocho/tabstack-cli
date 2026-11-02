@@ -285,7 +285,7 @@ tabstack agent automate "Find the pricing for the Pro plan" --url https://exampl
 tabstack agent research "What are the latest developments in quantum computing?" --mode balanced
 
 # Let an automation pause to ask you for input mid-run
-tabstack agent automate "Search for wireless headphones and ask me which result to open" --url https://example.com --interactive
+tabstack agent automate "Search for octopus and ask me which article to open" --url https://www.wikipedia.org --interactive
 
 # Respond to a paused automation that asked for input (provide field values)
 tabstack agent input <request-id> --data '{"fields":[{"ref":"field1","value":"yes"}]}'
