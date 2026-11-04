@@ -86,32 +86,34 @@ func (c *Client) newRequest(ctx context.Context, path string, body any) (*http.R
 }
 
 // doJSON sends a request expecting a single JSON response, decoding it into out.
-// It is used by the non-streaming endpoints (extract, generate, input).
-func (c *Client) doJSON(ctx context.Context, path string, body, out any) error {
+// It is used by the non-streaming endpoints (extract, generate, input). It
+// returns the response headers on success so callers can read metadata the API
+// sends outside the body, such as provenance (see Source).
+func (c *Client) doJSON(ctx context.Context, path string, body, out any) (http.Header, error) {
 	req, err := c.newRequest(ctx, path, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return decodeError(resp)
+		return nil, decodeError(resp)
 	}
 
 	if out == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+		return resp.Header, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return nil
+	return resp.Header, nil
 }
 
 // doStream sends a request expecting an SSE stream, invoking fn for each event.

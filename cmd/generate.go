@@ -35,6 +35,7 @@ func newGenerateJSONCmd() *cobra.Command {
 		effort       string
 		geo          string
 		nocache      bool
+		provenance   bool
 	)
 
 	cmd := &cobra.Command{
@@ -82,11 +83,17 @@ func newGenerateJSONCmd() *cobra.Command {
 				NoCache:      nocache,
 			}
 
-			out, err := rootApp.client.GenerateJSON(context.Background(), req)
+			out, src, err := rootApp.client.GenerateJSON(context.Background(), req)
 			if err != nil {
 				return classifyError(err)
 			}
-			return rootApp.renderer.PrintJSON(out)
+			if err := rootApp.renderer.PrintJSON(out); err != nil {
+				return err
+			}
+			if provenance {
+				printProvenance(rootApp.renderer, src)
+			}
+			return nil
 		},
 	}
 
@@ -98,6 +105,7 @@ func newGenerateJSONCmd() *cobra.Command {
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addProvenanceFlag(f, &provenance)
 	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd

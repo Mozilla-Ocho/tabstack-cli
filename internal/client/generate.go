@@ -19,11 +19,13 @@ type GenerateJSONRequest struct {
 }
 
 // GenerateJSON fetches and transforms content into the caller's schema. As with
-// extract/json, the response shape is caller-defined so we return raw JSON.
-func (c *Client) GenerateJSON(ctx context.Context, req GenerateJSONRequest) (json.RawMessage, error) {
+// extract/json, the response shape is caller-defined so we return raw JSON,
+// with the source document's provenance alongside.
+func (c *Client) GenerateJSON(ctx context.Context, req GenerateJSONRequest) (json.RawMessage, Source, error) {
 	var out json.RawMessage
-	if err := c.doJSON(ctx, "/generate/json", req, &out); err != nil {
-		return nil, err
+	h, err := c.doJSON(ctx, "/generate/json", req, &out)
+	if err != nil {
+		return nil, Source{}, err
 	}
-	return out, nil
+	return out, sourceFrom(h), nil
 }
