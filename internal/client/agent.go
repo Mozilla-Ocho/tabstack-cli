@@ -47,7 +47,8 @@ type AutomateInputRequest struct {
 // AutomateInput submits an input response for a running automation task. This
 // endpoint is a plain request/response, not a stream.
 func (c *Client) AutomateInput(ctx context.Context, requestID string, req AutomateInputRequest) error {
-	return c.doJSON(ctx, "/automate/"+url.PathEscape(requestID)+"/input", req, nil)
+	_, err := c.doJSON(ctx, "/automate/"+url.PathEscape(requestID)+"/input", req, nil)
+	return err
 }
 
 // Citation is a single source backing a research report. The report text refers
