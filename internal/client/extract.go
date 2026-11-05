@@ -35,13 +35,15 @@ type ExtractJSONRequest struct {
 }
 
 // ExtractJSON fetches a URL and extracts structured data per the schema. The
-// response shape is dictated by the caller's schema, so we return the raw JSON.
-func (c *Client) ExtractJSON(ctx context.Context, req ExtractJSONRequest) (json.RawMessage, error) {
+// response shape is dictated by the caller's schema, so we return the raw JSON,
+// with the source document's provenance alongside.
+func (c *Client) ExtractJSON(ctx context.Context, req ExtractJSONRequest) (json.RawMessage, Source, error) {
 	var out json.RawMessage
-	if err := c.doJSON(ctx, "/extract/json", req, &out); err != nil {
-		return nil, err
+	h, err := c.doJSON(ctx, "/extract/json", req, &out)
+	if err != nil {
+		return nil, Source{}, err
 	}
-	return out, nil
+	return out, sourceFrom(h), nil
 }
 
 // ExtractMarkdownRequest is the body for POST /extract/markdown.
@@ -81,9 +83,13 @@ type ExtractMarkdownResponse struct {
 	Metadata *Metadata `json:"metadata,omitempty"`
 }
 
-// ExtractMarkdown fetches a URL and converts it to clean Markdown.
-func (c *Client) ExtractMarkdown(ctx context.Context, req ExtractMarkdownRequest) (ExtractMarkdownResponse, error) {
+// ExtractMarkdown fetches a URL and converts it to clean Markdown, returning the
+// source document's provenance alongside.
+func (c *Client) ExtractMarkdown(ctx context.Context, req ExtractMarkdownRequest) (ExtractMarkdownResponse, Source, error) {
 	var out ExtractMarkdownResponse
-	err := c.doJSON(ctx, "/extract/markdown", req, &out)
-	return out, err
+	h, err := c.doJSON(ctx, "/extract/markdown", req, &out)
+	if err != nil {
+		return out, Source{}, err
+	}
+	return out, sourceFrom(h), nil
 }

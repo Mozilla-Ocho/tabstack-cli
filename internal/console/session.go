@@ -107,8 +107,8 @@ func (m *SessionManager) refreshLocked(ctx context.Context) (string, error) {
 	tok, err := m.refresh(ctx, refreshToken)
 
 	// Cross-process rotation recovery. A sibling process shares the stored
-	// session (e.g. the MCP server running in Claude Desktop while the CLI is
-	// used in a terminal). If it refreshed first, the server invalidated the
+	// session (e.g. two CLI invocations running at once in different
+	// terminals or scripts). If it refreshed first, the server invalidated the
 	// token we just presented, so our refresh fails with invalid_grant even
 	// though nothing is wrong. Re-read the store: if the persisted refresh token
 	// changed, adopt the sibling's session (or retry once with its token)

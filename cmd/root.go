@@ -62,8 +62,9 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "tabstack",
 		Short: "Command-line client for the Tabstack AI API",
-		Long: "tabstack is a CLI for the Tabstack AI API: browser automation, web " +
-			"research, and structured extraction and generation from any URL.",
+		Long: "tabstack is a CLI for the Tabstack AI API: web research with cited " +
+			"sources, structured extraction and generation from any URL, and " +
+			"browser automation.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
@@ -101,7 +102,6 @@ func NewRootCmd() *cobra.Command {
 		newAuthCmd(),
 		newKeysCmd(),
 		newConfigCmd(),
-		newMCPCmd(),
 	)
 
 	return root

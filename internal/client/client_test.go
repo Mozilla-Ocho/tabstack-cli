@@ -80,7 +80,7 @@ func TestExtractMarkdownSuccess(t *testing.T) {
 		_, _ = io.WriteString(w, `{"content":"# Hi","url":"https://e","metadata":{"title":"T"}}`)
 	})
 
-	resp, err := c.ExtractMarkdown(context.Background(), ExtractMarkdownRequest{URL: "https://e"})
+	resp, _, err := c.ExtractMarkdown(context.Background(), ExtractMarkdownRequest{URL: "https://e"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestExtractJSONReturnsRaw(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"any":"shape","n":[1,2]}`)
 	})
-	raw, err := c.ExtractJSON(context.Background(), ExtractJSONRequest{
+	raw, _, err := c.ExtractJSON(context.Background(), ExtractJSONRequest{
 		URL:        "https://e",
 		JSONSchema: json.RawMessage(`{"type":"object"}`),
 	})
@@ -113,7 +113,7 @@ func TestAPIErrorDecoding(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":"bad schema"}`)
 	})
-	_, err := c.ExtractJSON(context.Background(), ExtractJSONRequest{URL: "https://e"})
+	_, _, err := c.ExtractJSON(context.Background(), ExtractJSONRequest{URL: "https://e"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %v, want *APIError", err)
@@ -132,7 +132,7 @@ func TestAPIErrorPlainBody(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, "  upstream exploded  ")
 	})
-	_, err := c.ExtractMarkdown(context.Background(), ExtractMarkdownRequest{URL: "x"})
+	_, _, err := c.ExtractMarkdown(context.Background(), ExtractMarkdownRequest{URL: "x"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %v", err)
@@ -277,7 +277,7 @@ func TestContextCancellation(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := c.ExtractMarkdown(ctx, ExtractMarkdownRequest{URL: "x"})
+	_, _, err := c.ExtractMarkdown(ctx, ExtractMarkdownRequest{URL: "x"})
 	if err == nil {
 		t.Fatal("expected cancellation error")
 	}

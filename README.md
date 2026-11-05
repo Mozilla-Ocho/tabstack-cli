@@ -1,6 +1,6 @@
 # tabstack
 
-> Every web interaction your agent or stack needs: browser automation, web research, and structured extraction from any URL.
+> Give your model the web without giving up your privacy.
 
 [![CI](https://github.com/Mozilla-Ocho/tabstack-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Mozilla-Ocho/tabstack-cli/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Mozilla-Ocho/tabstack-cli.svg)](https://pkg.go.dev/github.com/Mozilla-Ocho/tabstack-cli)
@@ -8,11 +8,11 @@
 [![Release](https://img.shields.io/github/v/release/Mozilla-Ocho/tabstack-cli?include_prereleases&sort=semver)](https://github.com/Mozilla-Ocho/tabstack-cli/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`tabstack` is a single-binary CLI client for the [Tabstack AI API](https://tabstack.ai):
-every web interaction your agent or stack needs, from the terminal or a script.
-It turns any URL into clean Markdown or schema-shaped JSON, runs natural-language
-browser automation, and answers research questions with cited sources, all with
-output that's pretty in a terminal and pipeable into `jq`.
+`tabstack` is a single-binary CLI client for the [Tabstack AI API](https://tabstack.ai),
+from the terminal or a script. It answers research questions with cited sources,
+turns any URL into clean Markdown or schema-shaped JSON, and runs natural-language
+browser automation, all with output that's pretty in a terminal and pipeable into
+`jq`. Never trained on. Private by default. Built by Mozilla.
 
 ```console
 $ tabstack extract markdown https://example.com --metadata
@@ -41,10 +41,10 @@ This domain is for use in illustrative examples in documents...
 
 ## Features
 
+- **Research**: search the web, synthesise an answer, and print it with numbered, cited sources.
 - **Extract**: convert any page to clean Markdown, or pull structured data shaped by your own JSON schema.
 - **Generate**: fetch a page and transform it with AI into the JSON shape you describe.
 - **Automate**: run natural-language browser tasks server-side, streaming progress as they go.
-- **Research**: search the web, synthesise an answer, and print it with numbered, cited sources.
 - **Scriptable**: pretty output on a TTY, JSON when piped; meaningful exit codes for branching in scripts.
 - **No dependencies to run**: a single static Go binary; pre-built for macOS, Linux, and Windows.
 
@@ -244,7 +244,6 @@ it cannot leave you with nothing that works. `--force` overrides that.
 | `tabstack config show` | Show stored config for every org, secrets redacted |
 | `tabstack config path` | Print the config file path |
 | `tabstack config drop-legacy-key` | Remove a pre-organisation API key once an org key is in place |
-| `tabstack mcp` | Run a local MCP server exposing Tabstack tools over stdio |
 
 Run `tabstack <command> --help` for the full flag list on any command.
 
@@ -286,7 +285,7 @@ tabstack agent automate "Find the pricing for the Pro plan" --url https://exampl
 tabstack agent research "What are the latest developments in quantum computing?" --mode balanced
 
 # Let an automation pause to ask you for input mid-run
-tabstack agent automate "Log in and download the latest invoice" --url https://example.com --interactive
+tabstack agent automate "Search for octopus and ask me which article to open" --url https://www.wikipedia.org --interactive
 
 # Respond to a paused automation that asked for input (provide field values)
 tabstack agent input <request-id> --data '{"fields":[{"ref":"field1","value":"yes"}]}'
@@ -357,48 +356,6 @@ schema already exists locally and differs from the library, you're prompted to
 and re-pulling later never silently discards your edits. Use `--force` to
 overwrite without prompting. In a non-interactive shell a conflict fails (exit 2)
 unless `--force` is given.
-
-### MCP server
-
-`tabstack mcp` runs a local [Model Context Protocol](https://modelcontextprotocol.io)
-server over stdio, so an MCP client (Claude Desktop, an IDE, another agent) can
-call Tabstack as tools: `extract_markdown`, `extract_json`, `generate_json`,
-`automate`, `research`, `schema_list` / `schema_resolve`, and read-only account
-context (`whoami`, `list_orgs`, `active_org`).
-
-Sign in first (`tabstack auth login`) or set `TABSTACK_API_KEY`. Product calls
-use your org-scoped API key; if you are signed in but have no key stored, one is
-created for the active organisation on first start.
-
-#### Add to Claude Desktop
-
-1. Open **Settings → Developer → Edit Config** (this opens `claude_desktop_config.json`), or edit it directly:
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-2. Add a `tabstack` entry under `mcpServers`:
-
-   ```json
-   {
-     "mcpServers": {
-       "tabstack": {
-         "command": "tabstack",
-         "args": ["mcp"]
-       }
-     }
-   }
-   ```
-
-3. Restart Claude Desktop. The Tabstack tools appear in the tools menu (🔌).
-
-If Claude Desktop reports it can't find the command, use the absolute path to
-the binary instead, since its `PATH` differs from your shell's. Find it with
-`which tabstack` and set `"command"` to that (the install script puts it at
-`/usr/local/bin/tabstack`).
-To pin an API key for a non-interactive setup, add
-`"env": { "TABSTACK_API_KEY": "…" }` to the entry.
-
-stdout carries the JSON-RPC protocol; logs go to stderr. Closing the connection
-(or Ctrl-C) shuts the server down cleanly.
 
 ## Common options
 

@@ -23,10 +23,11 @@ func newExtractCmd() *cobra.Command {
 // fetch-based endpoints, so we wire them per-command but with identical names.
 func newExtractMarkdownCmd() *cobra.Command {
 	var (
-		effort   string
-		geo      string
-		metadata bool
-		nocache  bool
+		effort     string
+		geo        string
+		metadata   bool
+		nocache    bool
+		provenance bool
 	)
 
 	cmd := &cobra.Command{
@@ -45,11 +46,17 @@ func newExtractMarkdownCmd() *cobra.Command {
 				NoCache:   nocache,
 			}
 
-			resp, err := rootApp.client.ExtractMarkdown(context.Background(), req)
+			resp, src, err := rootApp.client.ExtractMarkdown(context.Background(), req)
 			if err != nil {
 				return classifyError(err)
 			}
-			return rootApp.renderer.PrintMarkdown(resp)
+			if err := rootApp.renderer.PrintMarkdown(resp); err != nil {
+				return err
+			}
+			if provenance {
+				printProvenance(rootApp.renderer, src)
+			}
+			return nil
 		},
 	}
 
@@ -58,6 +65,7 @@ func newExtractMarkdownCmd() *cobra.Command {
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&metadata, "metadata", false, "include extracted page metadata")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addProvenanceFlag(f, &provenance)
 
 	return cmd
 }
@@ -70,6 +78,7 @@ func newExtractJSONCmd() *cobra.Command {
 		effort     string
 		geo        string
 		nocache    bool
+		provenance bool
 	)
 
 	cmd := &cobra.Command{
@@ -98,11 +107,17 @@ func newExtractJSONCmd() *cobra.Command {
 				NoCache:    nocache,
 			}
 
-			out, err := rootApp.client.ExtractJSON(context.Background(), req)
+			out, src, err := rootApp.client.ExtractJSON(context.Background(), req)
 			if err != nil {
 				return classifyError(err)
 			}
-			return rootApp.renderer.PrintJSON(out)
+			if err := rootApp.renderer.PrintJSON(out); err != nil {
+				return err
+			}
+			if provenance {
+				printProvenance(rootApp.renderer, src)
+			}
+			return nil
 		},
 	}
 
@@ -113,6 +128,7 @@ func newExtractJSONCmd() *cobra.Command {
 	f.StringVar(&effort, "effort", "", "fetch effort: min|standard|max")
 	f.StringVar(&geo, "geo", "", "geotarget country code (ISO 3166-1 alpha-2, e.g. GB)")
 	f.BoolVar(&nocache, "nocache", false, "bypass cache and fetch fresh")
+	addProvenanceFlag(f, &provenance)
 	_ = cmd.RegisterFlagCompletionFunc("schema-name", completeLocalSchemaNames)
 
 	return cmd
