@@ -466,8 +466,8 @@ described in [openapi.yaml](openapi.yaml).
 
 Report a problem or request a feature in
 [tabstack-feedback](https://github.com/Mozilla-Ocho/tabstack-feedback/issues/new/choose).
-Include the CLI version (`tabstack --version`) and the `x-trace-id` from the
-failing response when relevant (`--debug` prints it). Never paste API keys or
+Include the CLI version (`tabstack --version`) and, when relevant, the trace id
+that `--debug` prints (shown as `trace=`). Never paste API keys or
 personal data into an issue.
 
 ## Contributing
