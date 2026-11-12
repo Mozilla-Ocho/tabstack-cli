@@ -462,6 +462,14 @@ make help         # list all targets
 See [CLAUDE.md](CLAUDE.md) for an architecture overview; the API surface is
 described in [openapi.yaml](openapi.yaml).
 
+## Feedback
+
+Report a problem or request a feature in
+[tabstack-feedback](https://github.com/Mozilla-Ocho/tabstack-feedback/issues/new/choose).
+Include the CLI version (`tabstack --version`) and, when relevant, the trace id
+that `--debug` prints (shown as `trace=`). Never paste API keys or
+personal data into an issue.
+
 ## Contributing
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). This project

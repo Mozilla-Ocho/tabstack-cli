@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Report a problem or request a feature
+    url: https://github.com/Mozilla-Ocho/tabstack-feedback/issues/new/choose
+    about: Tabstack API, SDK, and docs problems and ideas. For bugs in the CLI itself, use the templates above.
   - name: Security vulnerability
     url: https://github.com/Mozilla-Ocho/tabstack-cli/security/advisories/new
     about: Report security issues privately. Do not open a public issue.
